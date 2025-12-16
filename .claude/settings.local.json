@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:cheatography.com)",
+      "mcp__svelte__list-sections",
+      "mcp__svelte__get-documentation",
+      "Bash(npx sv create:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npx tsx:*)",
+      "Bash(curl:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npx shadcn-svelte@latest init)",
+      "Bash(npx shadcn-svelte@latest init:*)",
+      "Bash(npx shadcn-svelte@latest add:*)",
+      "Bash(npm ls:*)",
+      "WebFetch(domain:www.shadcn-svelte.com)",
+      "Bash(npm uninstall:*)",
+      "Bash(tree:*)",
+      "Skill(superpowers:brainstorming)",
+      "Bash(mkdir:*)",
+      "Bash(npm run check:*)",
+      "Bash(npx playwright install:*)",
+      "Bash(timeout 15 npx tsx:*)",
+      "Bash(timeout 10 npx tsx:*)",
+      "mcp__svelte__svelte-autofixer",
+      "Bash(timeout 120 npx tsx:*)",
+      "Bash(timeout 300 npx tsx:*)",
+      "WebFetch(domain:layerchart.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cat:*)",
+      "Bash(npx screenshot:*)",
+      "Bash(npx capture-website-cli:*)",
+      "Bash(npx pageres:*)",
+      "Bash(npm search:*)",
+      "Bash(npx screenshot-cli:*)",
+      "Bash(python3:*)",
+      "Bash(npm run build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
