@@ -1,0 +1,103 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+	--font-sans: 'Inter', sans-serif;
+	--font-serif: 'Fraunces', serif;
+	--font-mono: 'JetBrains Mono', monospace;
+
+	--color-background: #f8f8f6;
+	--color-foreground: #1a1a1a;
+	--color-accent: #00a89d;
+	--color-accent-foreground: #ffffff;
+	--color-muted: #f0f0ee;
+	--color-muted-foreground: #6b6b6b;
+	--color-border: #e2e2e0;
+	--color-card: #ffffff;
+	--color-card-foreground: #1a1a1a;
+	--color-success: #22c55e;
+	--color-success-foreground: #166534;
+	--color-destructive: #ef4444;
+	--color-destructive-foreground: #991b1b;
+
+	--color-input: #e2e2e0;
+	--color-ring: #00a89d;
+	--color-primary: #1a1a1a;
+	--color-primary-foreground: #f8f8f6;
+	--color-secondary: #f0f0ee;
+	--color-secondary-foreground: #1a1a1a;
+	--color-popover: #ffffff;
+	--color-popover-foreground: #1a1a1a;
+
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 4px;
+}
+
+.dark {
+	@theme inline {
+		--color-background: #0a0a0a;
+		--color-foreground: #f8f8f6;
+		--color-accent: #00a89d;
+		--color-accent-foreground: #ffffff;
+		--color-muted: #1a1a1a;
+		--color-muted-foreground: #a0a0a0;
+		--color-border: #2a2a2a;
+		--color-card: #111111;
+		--color-card-foreground: #f8f8f6;
+		--color-input: #2a2a2a;
+		--color-ring: #00a89d;
+		--color-primary: #f8f8f6;
+		--color-primary-foreground: #0a0a0a;
+		--color-secondary: #1a1a1a;
+		--color-secondary-foreground: #f8f8f6;
+		--color-popover: #111111;
+		--color-popover-foreground: #f8f8f6;
+	}
+}
+
+@layer utilities {
+	.dot-pattern {
+		background-image: radial-gradient(var(--color-accent) 1px, transparent 1px);
+		background-size: 8px 8px;
+	}
+
+	.dot-pattern-subtle {
+		background-image: radial-gradient(var(--color-accent) 1px, transparent 1px);
+		background-size: 8px 8px;
+		opacity: 0.08;
+	}
+
+	.label {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--color-muted-foreground);
+	}
+
+	.stat-number {
+		font-family: var(--font-mono);
+		font-size: 3rem;
+		font-weight: 700;
+		color: var(--color-foreground);
+	}
+
+	.accent-bar {
+		border-left: 4px solid var(--color-accent);
+		padding-left: 1rem;
+	}
+}
+
+@layer base {
+	body {
+		@apply m-0 min-h-screen bg-background text-foreground;
+		font-family: var(--font-sans);
+	}
+
+	h1, h2, h3 {
+		font-family: var(--font-serif);
+	}
+}
