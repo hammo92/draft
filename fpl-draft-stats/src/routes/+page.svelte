@@ -37,7 +37,7 @@
 </script>
 
 <svelte:head>
-	<title>FPL Draft Stats - {data.league.name}</title>
+	<title>FPL Draft Stats - Who gets Isak?</title>
 </svelte:head>
 
 <main class="min-h-screen bg-background">
@@ -49,7 +49,7 @@
 				Fantasy Premier League Draft
 			</p>
 			<h1 class="font-serif text-4xl md:text-5xl font-bold text-foreground mb-2">
-				{data.league.name}
+				Who gets Isak?
 			</h1>
 			<p class="font-mono text-sm text-muted-foreground">
 				League {data.league.id}

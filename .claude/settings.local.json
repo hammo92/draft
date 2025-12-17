@@ -35,7 +35,8 @@
       "Bash(npm search:*)",
       "Bash(npx screenshot-cli:*)",
       "Bash(python3:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(pnpm add:*)"
     ],
     "deny": [],
     "ask": []
