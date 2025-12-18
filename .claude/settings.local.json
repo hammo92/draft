@@ -36,7 +36,10 @@
       "Bash(npx screenshot-cli:*)",
       "Bash(python3:*)",
       "Bash(npm run build:*)",
-      "Bash(pnpm add:*)"
+      "Bash(pnpm add:*)",
+      "WebSearch",
+      "WebFetch(domain:draft.premierleague.com)",
+      "WebFetch(domain:fantasy.premierleague.com)"
     ],
     "deny": [],
     "ask": []

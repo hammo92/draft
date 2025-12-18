@@ -672,8 +672,18 @@ export const load: PageServerLoad = async ({ fetch }) => {
 						const playerIn = players[t.element_in];
 						const playerOut = players[t.element_out];
 
-						// Calculate points from the gameweek AFTER the transfer onwards
-						// (transfer happens before the gameweek, so player plays from that GW)
+						// Find when player_in was next traded away (to avoid double-counting)
+						const nextTradeOut = managerTransactions.find(
+							other => other.element_out === t.element_in && other.event > t.event
+						);
+						const gainedUntilGw = nextTradeOut ? nextTradeOut.event : Infinity;
+
+						// Find when player_out was traded back in (to avoid double-counting)
+						const nextTradeIn = managerTransactions.find(
+							other => other.element_in === t.element_out && other.event > t.event
+						);
+						const lostUntilGw = nextTradeIn ? nextTradeIn.event : Infinity;
+
 						let pointsGained = 0;
 						let pointsLost = 0;
 
@@ -681,8 +691,14 @@ export const load: PageServerLoad = async ({ fetch }) => {
 							if (gw >= t.event) {
 								const liveData = liveDataMap.get(gw);
 								if (liveData) {
-									pointsGained += liveData[String(t.element_in)]?.stats?.total_points || 0;
-									pointsLost += liveData[String(t.element_out)]?.stats?.total_points || 0;
+									// Only count gained points while player was on the team
+									if (gw < gainedUntilGw) {
+										pointsGained += liveData[String(t.element_in)]?.stats?.total_points || 0;
+									}
+									// Only count lost points until player was re-acquired
+									if (gw < lostUntilGw) {
+										pointsLost += liveData[String(t.element_out)]?.stats?.total_points || 0;
+									}
 								}
 							}
 						}
