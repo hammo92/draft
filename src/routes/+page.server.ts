@@ -8,15 +8,385 @@ import type {
 	Standing,
 	DetailedEntry,
 	H2HRecord,
+	Match,
 	MatchResult,
 	ManagerLuck,
 	RivalryStats,
 	GameweekLuck,
 	Transaction,
-	TransferAnalysis
+	TransferAnalysis,
+	Pick as FplPick,
+	NemesisBunny,
+	ManagerStreak,
+	GameweekAwards,
+	WeeklyAward,
+	ManagerWouldHaveBeat,
+	WouldHaveBeatGW,
+	WeeklyBanter,
+	FunStatEntry,
+	FunStats,
+	RobberyCulprit,
+	Robbery,
+	ManagerRobberies,
+	ManagerLuckBreakdown,
+	PlayerGWStats
 } from '$lib/types/fpl';
+import { env } from '$env/dynamic/private';
 
 const LEAGUE_ID = 21959;
+
+// Player baseline stats derived from season totals
+interface PlayerBaseline {
+	playerId: number;
+	position: 1 | 2 | 3 | 4;  // GK, DEF, MID, FWD
+	seasonMinutes: number;
+	// Per-90 rates
+	goalsPerGame: number;
+	assistsPerGame: number;
+	cleanSheetsPerGame: number;
+	bonusPerGame: number;
+	savesPerGame: number;        // GK only, 0 for outfield
+	// Negative events per-90
+	yellowsPerGame: number;
+	redsPerGame: number;
+	ownGoalsPerGame: number;
+	penaltiesMissedPerGame: number;
+	penaltiesSavedPerGame: number;  // GK only, 0 for outfield
+}
+
+// FDR multipliers for expected output adjustment
+const FDR_MULTIPLIERS: Record<number, number> = {
+	1: 1.15,  // Easiest - expect 15% more output
+	2: 1.08,
+	3: 1.00,
+	4: 0.93,
+	5: 0.85   // Hardest - expect 15% less
+};
+
+// Point values by position
+const GOAL_POINTS: Record<number, number> = { 1: 6, 2: 6, 3: 5, 4: 4 };
+const CS_POINTS: Record<number, number> = { 1: 4, 2: 4, 3: 1, 4: 0 };
+
+// Position-based fallback rates for rare events (when player has insufficient sample)
+const POSITION_FALLBACK_RATES = {
+	yellowsPerGame: { 1: 0.05, 2: 0.12, 3: 0.10, 4: 0.08 } as Record<number, number>,
+	redsPerGame: { 1: 0.002, 2: 0.004, 3: 0.003, 4: 0.003 } as Record<number, number>,
+	ownGoalsPerGame: { 1: 0.002, 2: 0.008, 3: 0.003, 4: 0.002 } as Record<number, number>,
+	penaltiesMissedPerGame: { 1: 0.001, 2: 0.002, 3: 0.008, 4: 0.012 } as Record<number, number>,
+	penaltiesSavedPerGame: { 1: 0.015, 2: 0, 3: 0, 4: 0 } as Record<number, number>,
+};
+
+// Position-based fallback rates for main stats (when player has < MIN_MINUTES_THRESHOLD)
+// Uses league-average per-90 rates by position
+const POSITION_MAIN_FALLBACKS = {
+	goalsPerGame: { 1: 0.01, 2: 0.08, 3: 0.15, 4: 0.35 } as Record<number, number>,
+	assistsPerGame: { 1: 0.02, 2: 0.10, 3: 0.15, 4: 0.15 } as Record<number, number>,
+	cleanSheetsPerGame: { 1: 0.35, 2: 0.35, 3: 0.15, 4: 0 } as Record<number, number>,
+	bonusPerGame: { 1: 1.5, 2: 1.8, 3: 2.0, 4: 2.2 } as Record<number, number>,
+	savesPerGame: { 1: 3.0, 2: 0, 3: 0, 4: 0 } as Record<number, number>,
+};
+
+// Minimum minutes threshold for using player's own rate vs position fallback
+const MIN_MINUTES_THRESHOLD = 900;  // ~10 full games
+
+// Get effective rate for rare events - use player rate if sufficient sample, else position fallback
+function getEffectiveRate(
+	playerRate: number,
+	playerMinutes: number,
+	position: number,
+	rateType: keyof typeof POSITION_FALLBACK_RATES
+): number {
+	if (playerMinutes >= MIN_MINUTES_THRESHOLD) {
+		return playerRate;
+	}
+	return POSITION_FALLBACK_RATES[rateType][position] || 0;
+}
+
+// Build player baseline lookup from season stats
+function buildPlayerBaselines(players: Record<number, EnrichedPlayer>): Map<number, PlayerBaseline> {
+	const baselines = new Map<number, PlayerBaseline>();
+
+	for (const [id, player] of Object.entries(players)) {
+		const playerId = parseInt(id);
+		const seasonMinutes = player.minutes || 0;
+		const position = player.element_type as 1 | 2 | 3 | 4;
+
+		// Calculate per-90 rates (raw - will use getEffectiveRate for rare events)
+		const per90 = (stat: number) => seasonMinutes > 0 ? (stat / seasonMinutes) * 90 : 0;
+
+		// For players with insufficient minutes, use position-based fallbacks for main stats
+		const usePlayerRate = seasonMinutes >= MIN_MINUTES_THRESHOLD;
+
+		baselines.set(playerId, {
+			playerId,
+			position,
+			seasonMinutes,
+			// Positive stats - use position fallback if insufficient minutes
+			goalsPerGame: usePlayerRate ? per90(player.goals_scored || 0) : POSITION_MAIN_FALLBACKS.goalsPerGame[position],
+			assistsPerGame: usePlayerRate ? per90(player.assists || 0) : POSITION_MAIN_FALLBACKS.assistsPerGame[position],
+			cleanSheetsPerGame: usePlayerRate ? per90(player.clean_sheets || 0) : POSITION_MAIN_FALLBACKS.cleanSheetsPerGame[position],
+			bonusPerGame: usePlayerRate ? per90(player.bonus || 0) : POSITION_MAIN_FALLBACKS.bonusPerGame[position],
+			savesPerGame: usePlayerRate ? per90(player.saves || 0) : POSITION_MAIN_FALLBACKS.savesPerGame[position],
+			// Negative events (rare events still use getEffectiveRate at calculation time)
+			yellowsPerGame: per90(player.yellow_cards || 0),
+			redsPerGame: per90(player.red_cards || 0),
+			ownGoalsPerGame: per90(player.own_goals || 0),
+			penaltiesMissedPerGame: per90(player.penalties_missed || 0),
+			penaltiesSavedPerGame: per90(player.penalties_saved || 0),
+		});
+	}
+
+	return baselines;
+}
+
+// Calculate expected goals/assists for a player in a specific match
+function getExpectedOutput(
+	playerId: number,
+	matchMinutes: number,
+	baselines: Map<number, PlayerBaseline>
+): { expectedGoals: number; expectedAssists: number } {
+	const baseline = baselines.get(playerId);
+	if (!baseline || matchMinutes === 0) {
+		return { expectedGoals: 0, expectedAssists: 0 };
+	}
+
+	return {
+		expectedGoals: (baseline.goalsPerGame * matchMinutes) / 90,
+		expectedAssists: (baseline.assistsPerGame * matchMinutes) / 90
+	};
+}
+
+// Luck component for a single scoring category
+interface LuckComponent {
+	actual: number;        // Actual events (goals, assists, etc.)
+	expected: number;      // Expected events based on baseline
+	luck: number;          // actual - expected (in raw units)
+	pointsPerUnit: number; // FPL points per unit (e.g., 4 for DEF goal)
+	points: number;        // luck converted to FPL points
+}
+
+// Full player gameweek luck breakdown
+interface PlayerGameweekLuck {
+	playerId: number;
+	playerName: string;
+	gameweek: number;
+	position: number;
+	minutesPlayed: number;
+	// Component breakdown
+	appearance: LuckComponent;
+	goals: LuckComponent;
+	assists: LuckComponent;
+	cleanSheet: LuckComponent;
+	goalsConceded: LuckComponent;
+	bonus: LuckComponent;
+	saves: LuckComponent;
+	yellowCards: LuckComponent;
+	redCards: LuckComponent;
+	ownGoals: LuckComponent;
+	penaltiesMissed: LuckComponent;
+	penaltiesSaved: LuckComponent;
+	// Totals
+	totalExpectedPoints: number;
+	totalActualPoints: number;
+	totalLuck: number;
+}
+
+// FDR multiplier for defensive stats (inverted - easy fixture = weaker opponent)
+// FDR 1 (easy for us) = opponent scores LESS, FDR 5 (hard for us) = opponent scores MORE
+const DEFENSIVE_FDR_MULTIPLIERS: Record<number, number> = {
+	1: 0.85,  // Easy fixture = weak opponent = 15% less opponent output
+	2: 0.92,
+	3: 1.00,
+	4: 1.08,
+	5: 1.15   // Hard fixture = strong opponent = 15% more opponent output
+};
+
+// Get FDR for a player's team in a given gameweek
+// For DGWs, returns the average FDR across all fixtures
+function getPlayerFDR(
+	playerTeam: number | undefined,
+	gameweek: number,
+	fixturesByGw: Map<number, FixtureData[]>
+): number {
+	if (!playerTeam) return 3; // Default neutral
+	const gwFixtures = fixturesByGw.get(gameweek) || [];
+
+	// Find ALL fixtures for this team in the gameweek (handles DGWs)
+	const teamFixtures = gwFixtures.filter(f => f.team_h === playerTeam || f.team_a === playerTeam);
+
+	if (teamFixtures.length === 0) return 3; // Default neutral if no fixture found
+
+	// Calculate FDR for each fixture
+	const fdrValues = teamFixtures.map(fixture => {
+		const isHome = fixture.team_h === playerTeam;
+		return isHome ? fixture.team_h_difficulty : fixture.team_a_difficulty;
+	});
+
+	// Return average FDR (handles both single fixtures and DGWs)
+	return fdrValues.reduce((sum, fdr) => sum + fdr, 0) / fdrValues.length;
+}
+
+// Calculate clean sheet probability using Poisson distribution
+function getCSProbability(opponentXG: number, fdr: number): number {
+	const adjustedXG = opponentXG * (DEFENSIVE_FDR_MULTIPLIERS[fdr] || 1);
+	return Math.exp(-adjustedXG);  // P(0 goals) = e^(-lambda)
+}
+
+// Calculate full player gameweek luck with component breakdown
+function calculatePlayerGameweekLuck(
+	playerId: number,
+	playerName: string,
+	gameweek: number,
+	gwStats: {
+		total_points: number;
+		minutes: number;
+		goals_scored: number;
+		assists: number;
+		clean_sheets: number;
+		goals_conceded: number;
+		bonus: number;
+		expected_goals_conceded: number;
+		saves?: number;
+		yellow_cards?: number;
+		red_cards?: number;
+		own_goals?: number;
+		penalties_saved?: number;
+		penalties_missed?: number;
+	},
+	baseline: PlayerBaseline,
+	opponentXG: number,  // Opponent's expected goals against this team
+	fdr: number          // Fixture difficulty rating 1-5
+): PlayerGameweekLuck {
+	const minutes = gwStats.minutes || 0;
+	const minutesFraction = minutes / 90;
+	const position = baseline.position;
+	const fdrMult = FDR_MULTIPLIERS[fdr] || 1;  // For attacking stats
+	const defFdrMult = DEFENSIVE_FDR_MULTIPLIERS[fdr] || 1;  // For defensive stats
+
+	// Helper to create a luck component
+	const createComponent = (
+		actual: number,
+		expected: number,
+		pointsPerUnit: number
+	): LuckComponent => {
+		const luck = actual - expected;
+		return {
+			actual,
+			expected,
+			luck,
+			pointsPerUnit,
+			points: luck * pointsPerUnit
+		};
+	};
+
+	// Goals: expected = (goalsPerGame × mins/90) × FDR_mult
+	const expectedGoals = baseline.goalsPerGame * minutesFraction * fdrMult;
+	const goals = createComponent(gwStats.goals_scored, expectedGoals, GOAL_POINTS[position]);
+
+	// Assists: expected = (assistsPerGame × mins/90) × FDR_mult
+	const expectedAssists = baseline.assistsPerGame * minutesFraction * fdrMult;
+	const assists = createComponent(gwStats.assists, expectedAssists, 3);
+
+	// Clean Sheet: expected = P(CS) × played60+
+	// Only counts if player played 60+ mins, probability from Poisson
+	const played60Plus = minutes >= 60 ? 1 : 0;
+	const csProbability = getCSProbability(opponentXG, fdr);
+	const expectedCS = csProbability * played60Plus;
+	const actualCS = gwStats.clean_sheets;
+	const cleanSheet = createComponent(actualCS, expectedCS, CS_POINTS[position]);
+
+	// Goals Conceded: expected = opponent_xG × defensive_FDR_mult (only for GK/DEF)
+	// Points: -0.5 per goal conceded for GK/DEF (every 2 = -1 pt)
+	const expectedGC = position <= 2 ? opponentXG * defFdrMult * played60Plus : 0;
+	const actualGC = position <= 2 ? gwStats.goals_conceded : 0;
+	const goalsConceded = createComponent(actualGC, expectedGC, -0.5);
+
+	// Bonus: expected = bonusPerGame × mins/90 (no FDR adjustment - bonus is relative to game)
+	const expectedBonus = baseline.bonusPerGame * minutesFraction;
+	const bonus = createComponent(gwStats.bonus, expectedBonus, 1);
+
+	// Saves: expected = (savesPerGame × mins/90) × defensive_FDR_mult (GK only)
+	// More saves expected against stronger opponents (higher defFdrMult)
+	// Points: 1 per 3 saves = 0.333 per save
+	const expectedSaves = position === 1 ? baseline.savesPerGame * minutesFraction * defFdrMult : 0;
+	const actualSaves = position === 1 ? (gwStats.saves || 0) : 0;
+	const saves = createComponent(actualSaves, expectedSaves, 1/3);
+
+	// Yellow Cards: expected = effective rate × mins/90
+	const effectiveYellowRate = getEffectiveRate(
+		baseline.yellowsPerGame, baseline.seasonMinutes, position, 'yellowsPerGame'
+	);
+	const expectedYellows = effectiveYellowRate * minutesFraction;
+	const yellowCards = createComponent(gwStats.yellow_cards || 0, expectedYellows, -1);
+
+	// Red Cards: expected = effective rate × mins/90
+	const effectiveRedRate = getEffectiveRate(
+		baseline.redsPerGame, baseline.seasonMinutes, position, 'redsPerGame'
+	);
+	const expectedReds = effectiveRedRate * minutesFraction;
+	const redCards = createComponent(gwStats.red_cards || 0, expectedReds, -3);
+
+	// Own Goals: expected = effective rate × mins/90
+	const effectiveOGRate = getEffectiveRate(
+		baseline.ownGoalsPerGame, baseline.seasonMinutes, position, 'ownGoalsPerGame'
+	);
+	const expectedOGs = effectiveOGRate * minutesFraction;
+	const ownGoals = createComponent(gwStats.own_goals || 0, expectedOGs, -2);
+
+	// Penalties Missed: expected = effective rate × mins/90
+	const effectivePenMissedRate = getEffectiveRate(
+		baseline.penaltiesMissedPerGame, baseline.seasonMinutes, position, 'penaltiesMissedPerGame'
+	);
+	const expectedPensMissed = effectivePenMissedRate * minutesFraction;
+	const penaltiesMissed = createComponent(gwStats.penalties_missed || 0, expectedPensMissed, -2);
+
+	// Penalties Saved: expected = effective rate × mins/90 × defensive_FDR_mult (GK only)
+	// More penalty opportunities against stronger opponents
+	const effectivePenSavedRate = position === 1 ? getEffectiveRate(
+		baseline.penaltiesSavedPerGame, baseline.seasonMinutes, position, 'penaltiesSavedPerGame'
+	) : 0;
+	const expectedPensSaved = effectivePenSavedRate * minutesFraction * defFdrMult;
+	const penaltiesSaved = createComponent(gwStats.penalties_saved || 0, expectedPensSaved, 5);
+
+	// Appearance: 0 mins = 0 pts, 1-59 mins = 1 pt, 60+ mins = 2 pts
+	// We track appearance but exclude it from luck - playing time is availability, not performance
+	// Setting expected = actual means appearance luck is always 0
+	const actualAppearance = minutes >= 60 ? 2 : minutes > 0 ? 1 : 0;
+	const expectedAppearance = actualAppearance; // No luck component - availability is not performance luck
+	const appearance = createComponent(actualAppearance, expectedAppearance, 1);
+
+	// Calculate totals (appearance excluded from luck since it's not performance-based)
+	const allComponents = [
+		goals, assists, cleanSheet, goalsConceded, bonus,
+		saves, yellowCards, redCards, ownGoals, penaltiesMissed, penaltiesSaved
+	];
+	const totalExpectedPoints = allComponents.reduce((sum, c) => sum + (c.expected * c.pointsPerUnit), 0);
+	const totalActualPoints = gwStats.total_points;
+	const totalLuck = allComponents.reduce((sum, c) => sum + c.points, 0);
+
+	return {
+		playerId,
+		playerName,
+		gameweek,
+		position,
+		minutesPlayed: minutes,
+		appearance,
+		goals,
+		assists,
+		cleanSheet,
+		goalsConceded,
+		bonus,
+		saves,
+		yellowCards,
+		redCards,
+		ownGoals,
+		penaltiesMissed,
+		penaltiesSaved,
+		totalExpectedPoints,
+		totalActualPoints,
+		totalLuck
+	};
+}
 
 // Build standings from API data
 function buildStandings(leagueDetails: LeagueDetails, histories: Map<number, EntryHistory>): Standing[] {
@@ -184,16 +554,408 @@ function calculateRivalryStats(fixtures: MatchResult[]): RivalryStats {
 	return { biggestWin, closestGame };
 }
 
-// Player history from element-summary API
-interface PlayerGameweekHistory {
-	round: number;
-	total_points: number;
-	opponent_team: number;
-	was_home: boolean;
+// Calculate nemesis (opponent you can't beat) and bunny (opponent you always beat) for each manager
+function calculateNemesisBunny(
+	matrix: H2HRecord[],
+	entries: LeagueDetails['league_entries']
+): NemesisBunny[] {
+	const entryLookup = new Map(entries.map(e => [e.id, e]));
+
+	// Build a map of each manager's record against all opponents
+	const managerRecords = new Map<number, Map<number, { wins: number; losses: number; draws: number }>>();
+
+	matrix.forEach(record => {
+		// Manager 1's perspective
+		if (!managerRecords.has(record.manager1Id)) {
+			managerRecords.set(record.manager1Id, new Map());
+		}
+		managerRecords.get(record.manager1Id)!.set(record.manager2Id, {
+			wins: record.wins,
+			losses: record.losses,
+			draws: record.draws
+		});
+
+		// Manager 2's perspective (reversed)
+		if (!managerRecords.has(record.manager2Id)) {
+			managerRecords.set(record.manager2Id, new Map());
+		}
+		managerRecords.get(record.manager2Id)!.set(record.manager1Id, {
+			wins: record.losses,  // Flipped
+			losses: record.wins,  // Flipped
+			draws: record.draws
+		});
+	});
+
+	const results: NemesisBunny[] = [];
+
+	for (const [managerId, opponents] of managerRecords) {
+		const entry = entries.find(e => e.id === managerId);
+		const managerName = entry
+			? `${entry.player_first_name || ''} ${entry.player_last_name || ''}`.trim() || 'Unknown'
+			: 'Unknown';
+
+		let nemesis: NemesisBunny['nemesis'] = null;
+		let bunny: NemesisBunny['bunny'] = null;
+		let worstDiff = Infinity;
+		let bestDiff = -Infinity;
+
+		for (const [opponentId, record] of opponents) {
+			const diff = record.wins - record.losses;
+			const totalGames = record.wins + record.losses + record.draws;
+
+			// Skip if no games played
+			if (totalGames === 0) continue;
+
+			const opponentEntry = entries.find(e => e.id === opponentId);
+			const opponentName = opponentEntry
+				? `${opponentEntry.player_first_name || ''} ${opponentEntry.player_last_name || ''}`.trim() || 'Unknown'
+				: 'Unknown';
+
+			// Nemesis: worst win-loss differential (most losses relative to wins)
+			if (diff < worstDiff || (diff === worstDiff && record.losses > (nemesis?.losses || 0))) {
+				worstDiff = diff;
+				nemesis = {
+					opponentId,
+					opponentName,
+					wins: record.wins,
+					losses: record.losses,
+					draws: record.draws,
+					record: `${record.wins}-${record.losses}-${record.draws}`
+				};
+			}
+
+			// Bunny: best win-loss differential (most wins relative to losses)
+			if (diff > bestDiff || (diff === bestDiff && record.wins > (bunny?.wins || 0))) {
+				bestDiff = diff;
+				bunny = {
+					opponentId,
+					opponentName,
+					wins: record.wins,
+					losses: record.losses,
+					draws: record.draws,
+					record: `${record.wins}-${record.losses}-${record.draws}`
+				};
+			}
+		}
+
+		// Only include if there's a meaningful difference
+		if (nemesis && worstDiff >= 0) nemesis = null; // Not a real nemesis if you're even or ahead
+		if (bunny && bestDiff <= 0) bunny = null; // Not a real bunny if you're even or behind
+
+		results.push({ managerId, managerName, nemesis, bunny });
+	}
+
+	return results;
 }
 
-interface PlayerHistoryData {
-	history: PlayerGameweekHistory[];
+// Calculate streaks for each manager
+function calculateStreaks(
+	matches: LeagueDetails['matches'],
+	entries: LeagueDetails['league_entries']
+): ManagerStreak[] {
+	const results: ManagerStreak[] = [];
+
+	for (const entry of entries) {
+		if (!entry.entry_id) continue;
+
+		const managerName = `${entry.player_first_name || ''} ${entry.player_last_name || ''}`.trim() || 'Unknown';
+
+		// Get all matches for this manager, sorted by gameweek
+		const managerMatches = matches
+			.filter(m => m.finished && (m.league_entry_1 === entry.id || m.league_entry_2 === entry.id))
+			.sort((a, b) => a.event - b.event);
+
+		// Calculate results
+		const results_list: ('W' | 'L' | 'D')[] = managerMatches.map(m => {
+			const isEntry1 = m.league_entry_1 === entry.id;
+			const myScore = isEntry1 ? m.league_entry_1_points : m.league_entry_2_points;
+			const theirScore = isEntry1 ? m.league_entry_2_points : m.league_entry_1_points;
+			if (myScore > theirScore) return 'W';
+			if (myScore < theirScore) return 'L';
+			return 'D';
+		});
+
+		// Current streak
+		let currentType: 'W' | 'L' | 'D' = results_list[results_list.length - 1] || 'D';
+		let currentCount = 0;
+		for (let i = results_list.length - 1; i >= 0; i--) {
+			if (results_list[i] === currentType) {
+				currentCount++;
+			} else {
+				break;
+			}
+		}
+
+		// Longest streaks
+		let longestWin = 0;
+		let longestLoss = 0;
+		let tempWin = 0;
+		let tempLoss = 0;
+
+		for (const result of results_list) {
+			if (result === 'W') {
+				tempWin++;
+				tempLoss = 0;
+				longestWin = Math.max(longestWin, tempWin);
+			} else if (result === 'L') {
+				tempLoss++;
+				tempWin = 0;
+				longestLoss = Math.max(longestLoss, tempLoss);
+			} else {
+				tempWin = 0;
+				tempLoss = 0;
+			}
+		}
+
+		// Last 5 form
+		const currentForm = results_list.slice(-5);
+
+		results.push({
+			managerId: entry.entry_id,
+			managerName,
+			currentStreak: { type: currentType, count: currentCount },
+			longestWinStreak: longestWin,
+			longestLossStreak: longestLoss,
+			currentForm
+		});
+	}
+
+	return results;
+}
+
+// Calculate weekly awards for each gameweek
+function calculateWeeklyAwards(
+	entries: DetailedEntry[],
+	matches: LeagueDetails['matches'],
+	liveDataMap: Map<number, Record<string, any>>,
+	completedGameweeks: number[],
+	players: Record<number, EnrichedPlayer>
+): GameweekAwards[] {
+	const awards: GameweekAwards[] = [];
+
+	for (const gw of completedGameweeks) {
+		const liveData = liveDataMap.get(gw);
+		if (!liveData) continue;
+
+		// Get gameweek scores for each manager
+		const gwScores: { managerId: number; managerName: string; points: number; benchPoints: number }[] = [];
+
+		for (const entry of entries) {
+			if (!entry.entry_id) continue;
+
+			const gwHistory = entry.history.find(h => h.event === gw);
+			const gwPicks = entry.recentPicks.find(p => p.gameweek === gw);
+
+			if (!gwHistory) continue;
+
+			const managerName = `${entry.player_first_name || ''} ${entry.player_last_name || ''}`.trim() || 'Unknown';
+
+			// Calculate WASTED bench points (same logic as main calculation)
+			let benchPoints = 0;
+			if (gwPicks?.data?.picks) {
+				const startingXI = gwPicks.data.picks.filter(p => p.position <= 11);
+				const benchPicks = gwPicks.data.picks.filter(p => p.position > 11);
+				const autoSubs = gwPicks.data.subs || [];
+				const playersWhoCameOn = new Set(autoSubs.map(s => s.element_in));
+
+				// Separate bench into GK and outfield
+				const benchGK = benchPicks.find(p => players[p.element]?.element_type === 1);
+				const benchOutfield = benchPicks.filter(p => players[p.element]?.element_type !== 1);
+
+				// GK waste
+				if (benchGK && !playersWhoCameOn.has(benchGK.element)) {
+					const benchGKPoints = liveData[String(benchGK.element)]?.total_points || 0;
+					const startingGK = startingXI.find(p => players[p.element]?.element_type === 1);
+					if (startingGK) {
+						const startingGKMinutes = liveData[String(startingGK.element)]?.minutes || 0;
+						const startingGKPoints = liveData[String(startingGK.element)]?.total_points || 0;
+						if (startingGKMinutes > 0) {
+							benchPoints += Math.max(0, benchGKPoints - startingGKPoints);
+						}
+					}
+				}
+
+				// Outfield waste
+				const outfieldBenchWhoDidntComeOn = benchOutfield.filter(p => !playersWhoCameOn.has(p.element));
+				if (outfieldBenchWhoDidntComeOn.length > 0) {
+					const benchOutfieldTotal = outfieldBenchWhoDidntComeOn.reduce((sum, p) => {
+						return sum + (liveData[String(p.element)]?.total_points || 0);
+					}, 0);
+
+					const outfieldStarters = startingXI
+						.filter(p => players[p.element]?.element_type !== 1)
+						.map(p => ({
+							points: liveData[String(p.element)]?.total_points || 0,
+							minutes: liveData[String(p.element)]?.minutes || 0
+						}))
+						.filter(p => p.minutes > 0)
+						.sort((a, b) => a.points - b.points);
+
+					const lowestStarters = outfieldStarters.slice(0, outfieldBenchWhoDidntComeOn.length);
+					const lowestStartersTotal = lowestStarters.reduce((sum, p) => sum + p.points, 0);
+					benchPoints += Math.max(0, benchOutfieldTotal - lowestStartersTotal);
+				}
+			}
+
+			gwScores.push({
+				managerId: entry.entry_id,
+				managerName,
+				points: gwHistory.points,
+				benchPoints
+			});
+		}
+
+		if (gwScores.length === 0) continue;
+
+		// Manager of the Week (highest score)
+		const sortedByPoints = [...gwScores].sort((a, b) => b.points - a.points);
+		const motw = sortedByPoints[0];
+
+		// Bench Blunder (most points left on bench)
+		const sortedByBench = [...gwScores].sort((a, b) => b.benchPoints - a.benchPoints);
+		const benchBlunder = sortedByBench[0];
+
+		// Closest Call (tightest H2H margin this week)
+		const gwMatches = matches.filter(m => m.event === gw && m.finished);
+		let closestCall: GameweekAwards['closestCall'] = null;
+		let minMargin = Infinity;
+
+		for (const match of gwMatches) {
+			const margin = Math.abs(match.league_entry_1_points - match.league_entry_2_points);
+			if (margin > 0 && margin < minMargin) {
+				minMargin = margin;
+				const winner = match.league_entry_1_points > match.league_entry_2_points
+					? entries.find(e => e.id === match.league_entry_1)
+					: entries.find(e => e.id === match.league_entry_2);
+				const loser = match.league_entry_1_points > match.league_entry_2_points
+					? entries.find(e => e.id === match.league_entry_2)
+					: entries.find(e => e.id === match.league_entry_1);
+
+				if (winner && loser) {
+					closestCall = {
+						winner: `${winner.player_first_name || ''} ${winner.player_last_name || ''}`.trim(),
+						loser: `${loser.player_first_name || ''} ${loser.player_last_name || ''}`.trim(),
+						margin
+					};
+				}
+			}
+		}
+
+		awards.push({
+			gameweek: gw,
+			managerOfTheWeek: {
+				managerId: motw.managerId,
+				managerName: motw.managerName,
+				value: motw.points,
+				label: `${motw.points} pts`
+			},
+			benchBlunder: {
+				managerId: benchBlunder.managerId,
+				managerName: benchBlunder.managerName,
+				value: benchBlunder.benchPoints,
+				label: `${benchBlunder.benchPoints} pts wasted`
+			},
+			differentialKing: null, // TODO: Implement if needed
+			closestCall
+		});
+	}
+
+	// Return most recent first
+	return awards.sort((a, b) => b.gameweek - a.gameweek);
+}
+
+// Calculate "would have beat" data for each manager
+function calculateWouldHaveBeat(
+	entries: DetailedEntry[],
+	matches: LeagueDetails['matches'],
+	completedGameweeks: number[]
+): ManagerWouldHaveBeat[] {
+	const results: ManagerWouldHaveBeat[] = [];
+
+	for (const entry of entries) {
+		if (!entry.entry_id) continue;
+
+		const managerName = `${entry.player_first_name || ''} ${entry.player_last_name || ''}`.trim() || 'Unknown';
+		const gameweeks: WouldHaveBeatGW[] = [];
+		let totalUnluckyWeeks = 0;
+		let totalRank = 0;
+		let rankedWeeks = 0;
+
+		for (const gw of completedGameweeks) {
+			const gwHistory = entry.history.find(h => h.event === gw);
+			if (!gwHistory) continue;
+
+			const myScore = gwHistory.points;
+
+			// Get all scores for this gameweek
+			const allScores = entries
+				.filter(e => e.entry_id && e.history.find(h => h.event === gw))
+				.map(e => ({
+					entryId: e.entry_id!,
+					score: e.history.find(h => h.event === gw)!.points
+				}));
+
+			// How many would I have beaten?
+			const wouldHaveBeaten = allScores.filter(s => s.entryId !== entry.entry_id && s.score < myScore).length;
+			const totalManagers = allScores.length;
+
+			// Find actual H2H match result
+			const match = matches.find(m =>
+				m.event === gw &&
+				m.finished &&
+				(m.league_entry_1 === entry.id || m.league_entry_2 === entry.id)
+			);
+
+			let actualOpponent = 'Unknown';
+			let actualResult: 'W' | 'L' | 'D' = 'D';
+
+			if (match) {
+				const isEntry1 = match.league_entry_1 === entry.id;
+				const opponentId = isEntry1 ? match.league_entry_2 : match.league_entry_1;
+				const opponentEntry = entries.find(e => e.id === opponentId);
+				actualOpponent = opponentEntry
+					? `${opponentEntry.player_first_name || ''} ${opponentEntry.player_last_name || ''}`.trim()
+					: 'Unknown';
+
+				const myMatchScore = isEntry1 ? match.league_entry_1_points : match.league_entry_2_points;
+				const theirScore = isEntry1 ? match.league_entry_2_points : match.league_entry_1_points;
+				actualResult = myMatchScore > theirScore ? 'W' : myMatchScore < theirScore ? 'L' : 'D';
+			}
+
+			// Unlucky if you beat more than half but still lost
+			const unluckyDraw = actualResult === 'L' && wouldHaveBeaten >= Math.floor(totalManagers / 2);
+			if (unluckyDraw) totalUnluckyWeeks++;
+
+			// Calculate rank (1 = best)
+			const rank = allScores.filter(s => s.score > myScore).length + 1;
+			totalRank += rank;
+			rankedWeeks++;
+
+			gameweeks.push({
+				gameweek: gw,
+				score: myScore,
+				wouldHaveBeaten,
+				totalManagers,
+				actualOpponent,
+				actualResult,
+				unluckyDraw
+			});
+		}
+
+		// Sort by gameweek descending
+		gameweeks.sort((a, b) => b.gameweek - a.gameweek);
+
+		results.push({
+			managerId: entry.entry_id,
+			managerName,
+			gameweeks,
+			totalUnluckyWeeks,
+			averageRank: rankedWeeks > 0 ? Math.round((totalRank / rankedWeeks) * 10) / 10 : 0
+		});
+	}
+
+	// Sort by most unlucky weeks
+	return results.sort((a, b) => b.totalUnluckyWeeks - a.totalUnluckyWeeks);
 }
 
 // Fixture with difficulty ratings
@@ -206,133 +968,23 @@ interface FixtureData {
 	team_a_difficulty: number;
 }
 
-// Calculate simple mean of values
-function calculateMean(values: number[]): number {
-	if (values.length === 0) return 0;
-	return values.reduce((sum, v) => sum + v, 0) / values.length;
-}
-
-// Get FDR multiplier for fixture difficulty (1-5 scale)
-function getFDRMultiplier(fdr: number): number {
-	const multipliers: Record<number, number> = {
-		1: 1.15,  // Easiest - expect 15% more points
-		2: 1.08,  // Easy - expect 8% more
-		3: 1.00,  // Average - neutral
-		4: 0.93,  // Hard - expect 7% less
-		5: 0.85   // Hardest - expect 15% less
-	};
-	return multipliers[fdr] || 1.0;
-}
-
-// Fetch player histories for all players in squads
-async function fetchPlayerHistories(
-	playerIds: number[],
-	fetchFn: typeof fetch
-): Promise<Map<number, PlayerGameweekHistory[]>> {
-	const historyMap = new Map<number, PlayerGameweekHistory[]>();
-
-	// Fetch in batches to avoid overwhelming the API
-	const batchSize = 10;
-	for (let i = 0; i < playerIds.length; i += batchSize) {
-		const batch = playerIds.slice(i, i + batchSize);
-		const results = await Promise.all(
-			batch.map(async (playerId) => {
-				try {
-					const res = await fetchFn(`https://fantasy.premierleague.com/api/element-summary/${playerId}/`);
-					const data: PlayerHistoryData = await res.json();
-					return { playerId, history: data.history || [] };
-				} catch (e) {
-					console.error(`Error fetching history for player ${playerId}:`, e);
-					return { playerId, history: [] };
-				}
-			})
-		);
-		results.forEach(({ playerId, history }) => {
-			historyMap.set(playerId, history);
-		});
-	}
-
-	return historyMap;
-}
-
-// Calculate expected score using mean and fixture difficulty
-function calculateExpectedScore(
-	startingXI: { element: number }[],
-	gameweek: number,
-	playerHistories: Map<number, PlayerGameweekHistory[]>,
-	fixturesByGw: Map<number, FixtureData[]>,
-	players: Record<number, EnrichedPlayer>
-): number {
-	const gwFixtures = fixturesByGw.get(gameweek) || [];
-	const LOOKBACK_GAMEWEEKS = 10;
-
-	return startingXI.reduce((sum, pick) => {
-		const history = playerHistories.get(pick.element) || [];
-		const player = players[pick.element];
-
-		if (history.length === 0) {
-			// Fallback to PPG if no history
-			return sum + (player ? parseFloat(player.points_per_game) || 0 : 0);
-		}
-
-		// Get points from gameweeks before this one (to calculate expected)
-		// Limit to last 10 gameweeks
-		const priorGwPoints = history
-			.filter(h => h.round < gameweek)
-			.slice(-LOOKBACK_GAMEWEEKS)
-			.map(h => h.total_points);
-
-		if (priorGwPoints.length === 0) {
-			return sum + (player ? parseFloat(player.points_per_game) || 0 : 0);
-		}
-
-		// Calculate mean of prior gameweek points
-		const meanPoints = calculateMean(priorGwPoints);
-
-		// Find fixture difficulty for this player's team this gameweek
-		const playerTeam = player?.team;
-		const fixture = gwFixtures.find(f => f.team_h === playerTeam || f.team_a === playerTeam);
-
-		if (fixture) {
-			const isHome = fixture.team_h === playerTeam;
-			const difficulty = isHome ? fixture.team_h_difficulty : fixture.team_a_difficulty;
-
-			// Apply FDR multiplier based on fixture difficulty
-			const difficultyMultiplier = getFDRMultiplier(difficulty);
-			return sum + meanPoints * difficultyMultiplier;
-		}
-
-		return sum + meanPoints;
-	}, 0);
-}
-
-// Calculate luck index for managers
+// Calculate luck index for managers using holistic per-player luck calculation
 async function calculateLuckIndex(
 	entries: DetailedEntry[],
 	matches: LeagueDetails['matches'],
 	players: Record<number, EnrichedPlayer>,
 	leagueEntries: LeagueDetails['league_entries'],
 	standings: Standing[],
-	fetchFn: typeof fetch
-): Promise<ManagerLuck[]> {
+	fetchFn: typeof fetch,
+	baselines: Map<number, PlayerBaseline>,
+	liveDataMap: Map<number, Record<string, PlayerGWStats>>
+): Promise<{ luck: ManagerLuck[]; fixturesByGw: Map<number, FixtureData[]> }> {
 	const entryLookup = new Map(leagueEntries.map(e => [e.id, e]));
 	const entryIdToLeagueId = new Map(leagueEntries.map(e => [e.entry_id, e.id]));
 	const standingsLookup = new Map(standings.map(s => [s.entry_id, s]));
 
-	// Collect all unique player IDs from picks
-	const playerIds = new Set<number>();
-	entries.forEach(entry => {
-		entry.recentPicks.forEach(pick => {
-			pick.data?.picks?.forEach(p => playerIds.add(p.element));
-		});
-	});
-
-	// Fetch player histories and fixtures in parallel
-	const [playerHistories, fixturesRes] = await Promise.all([
-		fetchPlayerHistories(Array.from(playerIds), fetchFn),
-		fetchFn('https://fantasy.premierleague.com/api/fixtures/')
-	]);
-
+	// Fetch fixtures for FDR data
+	const fixturesRes = await fetchFn('https://fantasy.premierleague.com/api/fixtures/');
 	const fixtures: FixtureData[] = await fixturesRes.json();
 
 	// Group fixtures by gameweek
@@ -342,7 +994,7 @@ async function calculateLuckIndex(
 		fixturesByGw.get(f.event)!.push(f);
 	});
 
-	return entries.map(entry => {
+	const managerLuck = entries.map(entry => {
 		const leagueEntryId = entryIdToLeagueId.get(entry.entry_id!);
 		const managerName = `${entry.player_first_name} ${entry.player_last_name}`.trim();
 		const managerStanding = standingsLookup.get(entry.entry_id!);
@@ -355,15 +1007,72 @@ async function calculateLuckIndex(
 			.filter(p => p.data?.picks)
 			.map(pick => {
 				const startingXI = pick.data!.picks.filter(p => p.position <= 11);
+				const autoSubs = pick.data!.subs || [];
+				const liveData = liveDataMap.get(pick.gameweek);
 
-				// Calculate expected using median + fixture difficulty
-				const expected = calculateExpectedScore(
-					startingXI,
-					pick.gameweek,
-					playerHistories,
-					fixturesByGw,
-					players
-				);
+				// Build set of players who actually contributed to the score:
+				// Starting XI who played + auto-subs who came on
+				const playersWhoCameOn = new Set(autoSubs.map(s => s.element_in));
+				const playersWhoWentOff = new Set(autoSubs.map(s => s.element_out));
+
+				// Calculate expected using holistic per-player luck system
+				let totalExpected = 0;
+				let totalLuck = 0;
+
+				if (liveData) {
+					// Process starting XI (excluding those who were subbed off with 0 mins)
+					for (const playerPick of startingXI) {
+						// Skip players who were auto-subbed off (they contributed 0 to actual)
+						if (playersWhoWentOff.has(playerPick.element)) continue;
+
+						const stats = liveData[String(playerPick.element)];
+						const baseline = baselines.get(playerPick.element);
+						const playerInfo = players[playerPick.element];
+
+						if (stats && baseline) {
+							const opponentXG = stats.expected_goals_conceded || 1.5;
+							const fdr = getPlayerFDR(playerInfo?.team, pick.gameweek, fixturesByGw);
+
+							const playerLuck = calculatePlayerGameweekLuck(
+								playerPick.element,
+								playerInfo?.web_name || 'Unknown',
+								pick.gameweek,
+								stats,
+								baseline,
+								opponentXG,
+								fdr
+							);
+
+							totalExpected += playerLuck.totalExpectedPoints;
+							totalLuck += playerLuck.totalLuck;
+						}
+					}
+
+					// Process auto-subs who came on (they contributed to actual)
+					for (const sub of autoSubs) {
+						const stats = liveData[String(sub.element_in)];
+						const baseline = baselines.get(sub.element_in);
+						const playerInfo = players[sub.element_in];
+
+						if (stats && baseline) {
+							const opponentXG = stats.expected_goals_conceded || 1.5;
+							const fdr = getPlayerFDR(playerInfo?.team, pick.gameweek, fixturesByGw);
+
+							const playerLuck = calculatePlayerGameweekLuck(
+								sub.element_in,
+								playerInfo?.web_name || 'Unknown',
+								pick.gameweek,
+								stats,
+								baseline,
+								opponentXG,
+								fdr
+							);
+
+							totalExpected += playerLuck.totalExpectedPoints;
+							totalLuck += playerLuck.totalLuck;
+						}
+					}
+				}
 
 				const gwHistory = entry.history.find(h => h.event === pick.gameweek);
 				const actual = gwHistory?.points || 0;
@@ -388,8 +1097,8 @@ async function calculateLuckIndex(
 				return {
 					gameweek: pick.gameweek,
 					actual,
-					expected: Math.round(expected * 10) / 10,
-					luck: Math.round((actual - expected) * 10) / 10,
+					expected: Math.round(totalExpected * 10) / 10,
+					luck: Math.round(totalLuck * 10) / 10,
 					opponent,
 					result
 				};
@@ -398,6 +1107,8 @@ async function calculateLuckIndex(
 
 		const seasonLuck = gameweeksLuck.reduce((sum, gw) => sum + gw.luck, 0);
 
+		// Points per fixture point earned (lower = more efficient at converting FPL points to wins)
+		// Example: 500 FPL pts / 15 fixture pts = 33.3 (needs 33 FPL pts per fixture point)
 		let efficiency = 0;
 		if (managerStanding && managerStanding.total > 0) {
 			efficiency = Math.round((managerStanding.points_for / managerStanding.total) * 10) / 10;
@@ -412,6 +1123,662 @@ async function calculateLuckIndex(
 			efficiency
 		};
 	});
+
+	return { luck: managerLuck, fixturesByGw };
+}
+
+// Fun stats calculation - types imported from '$lib/types/fpl'
+
+function calculateFunStats(
+	entries: DetailedEntry[],
+	liveDataMap: Map<number, Record<string, PlayerGWStats>>,
+	matches: Match[],
+	players: Record<number, EnrichedPlayer>,
+	startGameweek: number,
+	baselines: Map<number, PlayerBaseline>,
+	fixturesByGw: Map<number, FixtureData[]>
+): FunStats {
+	const getManagerName = (entry: DetailedEntry) =>
+		`${entry.player_first_name || ''} ${entry.player_last_name || ''}`.trim() || 'Unknown';
+
+	// 1. Clinical Finisher (Goals vs xG from actual match data)
+	// Uses per-GW xG from Opta - actual chances taken vs scored
+	const clinicalFinisher: FunStatEntry[] = entries.map(entry => {
+		let totalGoals = 0;
+		let totalXG = 0;
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.picks) continue;
+			const startingXI = pick.data.picks.filter(p => p.position <= 11);
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			for (const player of startingXI) {
+				const stats = liveData[String(player.element)];
+				if (stats) {
+					totalGoals += stats.goals_scored;
+					totalXG += stats.expected_goals || 0;
+				}
+			}
+		}
+
+		const diff = Math.round((totalGoals - totalXG) * 10) / 10;
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: diff,
+			label: `${diff > 0 ? '+' : ''}${diff.toFixed(1)} vs xG`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 2. Assist Luck (Assists vs xA from actual match data)
+	// Uses per-GW xA from Opta - actual key passes vs assists
+	const assistLuck: FunStatEntry[] = entries.map(entry => {
+		let totalAssists = 0;
+		let totalXA = 0;
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.picks) continue;
+			const startingXI = pick.data.picks.filter(p => p.position <= 11);
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			for (const player of startingXI) {
+				const stats = liveData[String(player.element)];
+				if (stats) {
+					totalAssists += stats.assists;
+					totalXA += stats.expected_assists || 0;
+				}
+			}
+		}
+
+		const diff = Math.round((totalAssists - totalXA) * 10) / 10;
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: diff,
+			label: `${diff > 0 ? '+' : ''}${diff.toFixed(1)} vs xA`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 3. Bonus Magnet (Total bonus points + near misses)
+	// Near miss = player with BPS >= 20 but got 0 bonus (likely just missed out)
+	const bonusMagnet: FunStatEntry[] = entries.map(entry => {
+		let totalBonus = 0;
+		let nearMisses = 0; // High BPS but no bonus
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.picks) continue;
+			const startingXI = pick.data.picks.filter(p => p.position <= 11);
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			for (const player of startingXI) {
+				const stats = liveData[String(player.element)];
+				if (stats) {
+					totalBonus += stats.bonus;
+					// High BPS (20+) but no bonus = near miss (4th place or tied)
+					if (stats.bps >= 20 && stats.bonus === 0) {
+						nearMisses++;
+					}
+				}
+			}
+		}
+
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: totalBonus,
+			label: `${totalBonus} pts${nearMisses > 0 ? ` (${nearMisses} near miss${nearMisses > 1 ? 'es' : ''})` : ''}`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 4. Smash & Grab (Wins when scoring below season average)
+	const smashAndGrab: FunStatEntry[] = entries.map(entry => {
+		const seasonAvg = entry.history.length > 0
+			? entry.history.reduce((sum, h) => sum + h.points, 0) / entry.history.length
+			: 0;
+
+		const flukyWins = matches.filter(m => {
+			if (!m.finished) return false;
+			const isEntry1 = m.league_entry_1 === entry.id;
+			const isEntry2 = m.league_entry_2 === entry.id;
+			if (!isEntry1 && !isEntry2) return false;
+
+			const myScore = isEntry1 ? m.league_entry_1_points : m.league_entry_2_points;
+			const theirScore = isEntry1 ? m.league_entry_2_points : m.league_entry_1_points;
+			return myScore > theirScore && myScore < seasonAvg;
+		}).length;
+
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: flukyWins,
+			label: `${flukyWins} fluky wins`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 5. Nearly Man (Losses when scoring above season average)
+	const nearlyMan: FunStatEntry[] = entries.map(entry => {
+		const seasonAvg = entry.history.length > 0
+			? entry.history.reduce((sum, h) => sum + h.points, 0) / entry.history.length
+			: 0;
+
+		const unluckyLosses = matches.filter(m => {
+			if (!m.finished) return false;
+			const isEntry1 = m.league_entry_1 === entry.id;
+			const isEntry2 = m.league_entry_2 === entry.id;
+			if (!isEntry1 && !isEntry2) return false;
+
+			const myScore = isEntry1 ? m.league_entry_1_points : m.league_entry_2_points;
+			const theirScore = isEntry1 ? m.league_entry_2_points : m.league_entry_1_points;
+			return myScore < theirScore && myScore > seasonAvg;
+		}).length;
+
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: unluckyLosses,
+			label: `${unluckyLosses} unlucky losses`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 6. One-Man Army (% of points from top scorer)
+	const oneManArmy: FunStatEntry[] = entries.map(entry => {
+		const playerPoints: Record<number, number> = {};
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.picks) continue;
+			const startingXI = pick.data.picks.filter(p => p.position <= 11);
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			for (const player of startingXI) {
+				const stats = liveData[String(player.element)];
+				if (stats) {
+					playerPoints[player.element] = (playerPoints[player.element] || 0) + stats.total_points;
+				}
+			}
+		}
+
+		const totalPoints = Object.values(playerPoints).reduce((sum, p) => sum + p, 0);
+		const topScorerPoints = Math.max(...Object.values(playerPoints), 0);
+		const percentage = totalPoints > 0 ? Math.round((topScorerPoints / totalPoints) * 100) : 0;
+
+		// Find top scorer name
+		const topScorerId = Object.entries(playerPoints).find(([_, pts]) => pts === topScorerPoints)?.[0];
+		const topScorerName = topScorerId ? players[Number(topScorerId)]?.web_name || 'Unknown' : 'N/A';
+
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: percentage,
+			label: `${percentage}% (${topScorerName})`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 7. Great Wall (Clean sheets vs expected based on opponent xG)
+	// Uses Poisson probability: P(CS) = e^(-xGC) for each defender who played 60+ mins
+	const greatWall: FunStatEntry[] = entries.map(entry => {
+		let totalActualCS = 0;
+		let totalExpectedCS = 0;
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.picks) continue;
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			// Get GK/DEF in starting XI
+			const defenders = pick.data.picks.filter(p => {
+				const player = players[p.element];
+				return p.position <= 11 && player && (player.element_type === 1 || player.element_type === 2);
+			});
+
+			// Get opponent xG from any defender who played (it's the same for all)
+			let opponentXG = 1.5; // Default
+			for (const player of defenders) {
+				const stats = liveData[String(player.element)];
+				if (stats?.expected_goals_conceded) {
+					opponentXG = stats.expected_goals_conceded;
+					break;
+				}
+			}
+
+			// For each defender who played 60+ mins, count CS and calculate expected
+			for (const player of defenders) {
+				const stats = liveData[String(player.element)];
+				if (stats && stats.minutes >= 60) {
+					totalActualCS += stats.clean_sheets;
+					// P(0 goals) = e^(-opponent_xG) is the probability of a clean sheet
+					totalExpectedCS += Math.exp(-opponentXG);
+				}
+			}
+		}
+
+		// Positive = more CS than expected (lucky/good defense)
+		// Negative = fewer CS than expected (unlucky/poor defense)
+		const diff = Math.round((totalActualCS - totalExpectedCS) * 10) / 10;
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: diff,
+			label: `${diff > 0 ? '+' : ''}${diff.toFixed(1)} vs expected`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 8. Auto-Sub Lottery (points gained from players who came off the bench)
+	// Positive = lucky bench order, bench players scored when they came on
+	// Negative = unlucky, bench players blanked when subbed in
+	const autoSubLottery: FunStatEntry[] = entries.map(entry => {
+		let autoSubPoints = 0;
+		let autoSubCount = 0;
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.subs || pick.data.subs.length === 0) continue;
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			// Each sub represents a player who came on from the bench
+			for (const sub of pick.data.subs) {
+				const incomingStats = liveData[String(sub.element_in)];
+				if (incomingStats) {
+					autoSubPoints += incomingStats.total_points;
+					autoSubCount++;
+				}
+			}
+		}
+
+		// Average points per auto-sub, or total if preferred
+		const avgPoints = autoSubCount > 0 ? Math.round((autoSubPoints / autoSubCount) * 10) / 10 : 0;
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: autoSubPoints,
+			label: `${autoSubPoints} pts (${autoSubCount} subs)`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 9. Consistency (Standard deviation of weekly scores)
+	const consistency: FunStatEntry[] = entries.map(entry => {
+		const scores = entry.history.map(h => h.points);
+		if (scores.length < 2) {
+			return {
+				managerId: entry.entry_id!,
+				managerName: getManagerName(entry),
+				value: 0,
+				label: 'N/A'
+			};
+		}
+
+		const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+		const variance = scores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scores.length;
+		const stdDev = Math.round(Math.sqrt(variance) * 10) / 10;
+
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: stdDev,
+			label: `±${stdDev} pts`
+		};
+	}).sort((a, b) => a.value - b.value); // Lower is better (more consistent)
+
+	// 10. Ceiling/Floor (Highest and lowest GW scores)
+	const ceilingFloor: FunStatEntry[] = entries.map(entry => {
+		const scores = entry.history.map(h => h.points);
+		const ceiling = Math.max(...scores, 0);
+		const floor = Math.min(...scores, 0);
+
+		return {
+			managerId: entry.entry_id!,
+			managerName: getManagerName(entry),
+			value: ceiling - floor,
+			label: `${ceiling} / ${floor}`
+		};
+	}).sort((a, b) => b.value - a.value);
+
+	// 11. Robbery Report - Find losses where opponent had significant luck or a standout performer
+	const robberies: ManagerRobberies[] = entries.map(entry => {
+		const managerName = getManagerName(entry);
+		const managerRobberies: Robbery[] = [];
+
+		// Find all losses for this manager
+		const losses = matches.filter(m => {
+			if (!m.finished) return false;
+			const isEntry1 = m.league_entry_1 === entry.id;
+			const isEntry2 = m.league_entry_2 === entry.id;
+			if (!isEntry1 && !isEntry2) return false;
+
+			const myScore = isEntry1 ? m.league_entry_1_points : m.league_entry_2_points;
+			const theirScore = isEntry1 ? m.league_entry_2_points : m.league_entry_1_points;
+			return myScore < theirScore;
+		});
+
+		for (const loss of losses) {
+			const isEntry1 = loss.league_entry_1 === entry.id;
+			const opponentLeagueId = isEntry1 ? loss.league_entry_2 : loss.league_entry_1;
+			const myScore = isEntry1 ? loss.league_entry_1_points : loss.league_entry_2_points;
+			const theirScore = isEntry1 ? loss.league_entry_2_points : loss.league_entry_1_points;
+			const margin = theirScore - myScore;
+
+			// Find opponent entry
+			const opponentEntry = entries.find(e => e.id === opponentLeagueId);
+			if (!opponentEntry) continue;
+
+			const opponentName = getManagerName(opponentEntry);
+
+			// Get opponent's picks for this gameweek
+			const opponentPicks = opponentEntry.recentPicks.find(p => p.gameweek === loss.event);
+			if (!opponentPicks?.data?.picks) continue;
+
+			const liveData = liveDataMap.get(loss.event);
+			if (!liveData) continue;
+
+			// Calculate luck for each opponent player using comprehensive system
+			const opponentStartingXI = opponentPicks.data.picks.filter(p => p.position <= 11);
+			let totalOpponentLuck = 0;
+			let biggestOverperformer: RobberyCulprit | null = null;
+			let maxLuck = -Infinity;
+			let hasHaulPlayer = false; // Player with 12+ points (double-digit haul)
+
+			for (const pick of opponentStartingXI) {
+				const stats = liveData[String(pick.element)];
+				const playerInfo = players[pick.element];
+				const baseline = baselines.get(pick.element);
+				if (!stats || !baseline) continue;
+
+				// Use player's expected_goals_conceded as opponent xG
+				// Get actual FDR from fixture data
+				const opponentXG = stats.expected_goals_conceded || 1.5;
+				const fdr = getPlayerFDR(playerInfo?.team, loss.event, fixturesByGw);
+
+				// Calculate comprehensive luck using new system
+				const playerLuck = calculatePlayerGameweekLuck(
+					pick.element,
+					playerInfo?.web_name || 'Unknown',
+					loss.event,
+					stats,
+					baseline,
+					opponentXG,
+					fdr
+				);
+
+				const luckPoints = playerLuck.totalLuck;
+				totalOpponentLuck += luckPoints;
+
+				// Check for haul (12+ points is a notable return)
+				if (stats.total_points >= 12) {
+					hasHaulPlayer = true;
+				}
+
+				// Track biggest overperformer (by points or by luck)
+				const playerScore = stats.total_points;
+				if (luckPoints > maxLuck || (playerScore >= 12 && (!biggestOverperformer || playerScore > biggestOverperformer.actualPoints))) {
+					if (luckPoints > 0 || playerScore >= 12) {
+						maxLuck = Math.max(luckPoints, maxLuck);
+						biggestOverperformer = {
+							playerId: pick.element,
+							playerName: playerInfo?.web_name || 'Unknown',
+							goals: stats.goals_scored,
+							assists: stats.assists,
+							expectedGoals: Math.round(playerLuck.goals.expected * 100) / 100,
+							expectedAssists: Math.round(playerLuck.assists.expected * 100) / 100,
+							actualPoints: stats.total_points,
+							expectedPoints: Math.round(playerLuck.totalExpectedPoints * 10) / 10,
+							luckPoints: Math.round(luckPoints * 10) / 10
+						};
+					}
+				}
+			}
+
+			// A robbery is when ONE player significantly overperforming causes the win
+			// The culprit's luck alone must exceed the margin of defeat
+			const culpritLuck = biggestOverperformer?.luckPoints || 0;
+			const isRobbery = biggestOverperformer && culpritLuck >= margin;
+
+			if (isRobbery && biggestOverperformer) {
+				// Calculate "real" scoreline without the culprit's overperformance
+				const realTheirScore = Math.round((theirScore - culpritLuck) * 10) / 10;
+
+				// Calculate robbery rating based on how much the culprit overperformed
+				// relative to the margin (how "stolen" was this win?)
+				let robberyRating = 1;
+				const culpritRatio = culpritLuck / margin;
+
+				if (culpritRatio >= 3 || culpritLuck >= 15) robberyRating = 5;
+				else if (culpritRatio >= 2 || culpritLuck >= 12) robberyRating = 4;
+				else if (culpritRatio >= 1.5 || culpritLuck >= 8) robberyRating = 3;
+				else if (culpritRatio >= 1) robberyRating = 2;
+
+				managerRobberies.push({
+					gameweek: loss.event,
+					opponentId: opponentLeagueId,
+					opponentName,
+					yourScore: myScore,
+					theirScore,
+					margin,
+					theirTotalLuck: Math.round(culpritLuck * 10) / 10, // Now this is the culprit's luck
+					realScoreline: { you: myScore, them: realTheirScore },
+					culprit: biggestOverperformer,
+					robberyRating
+				});
+			}
+		}
+
+		// Sort by robbery rating (most egregious first), then by gameweek
+		managerRobberies.sort((a, b) => b.robberyRating - a.robberyRating || b.gameweek - a.gameweek);
+
+		return {
+			managerId: entry.entry_id!,
+			managerName,
+			robberies: managerRobberies,
+			totalRobberies: managerRobberies.length,
+			totalPointsStolen: managerRobberies.reduce((sum, r) => sum + r.theirTotalLuck, 0)
+		};
+	}).filter(m => m.totalRobberies > 0)
+		.sort((a, b) => b.totalRobberies - a.totalRobberies);
+
+	// 12. Holistic Luck Breakdown by manager (all scoring components)
+	const luckBreakdown: import('$lib/types/fpl').ManagerLuckBreakdown[] = entries.map(entry => {
+		const managerName = getManagerName(entry);
+		const components = {
+			appearance: 0,
+			goals: 0,
+			assists: 0,
+			cleanSheets: 0,
+			goalsConceded: 0,
+			bonus: 0,
+			saves: 0,
+			rareEvents: 0
+		};
+		const gameweeks: Array<{ gameweek: number; luck: number }> = [];
+		let totalLuck = 0;
+
+		for (const pick of entry.recentPicks) {
+			if (!pick.data?.picks) continue;
+			const startingXI = pick.data.picks.filter(p => p.position <= 11);
+			const autoSubs = pick.data.subs || [];
+			const liveData = liveDataMap.get(pick.gameweek);
+			if (!liveData) continue;
+
+			// Build set of players who actually contributed to the score
+			const playersWhoWentOff = new Set(autoSubs.map(s => s.element_out));
+
+			let gwLuck = 0;
+
+			// Helper function to process a player's luck
+			const processPlayerLuck = (playerId: number) => {
+				const stats = liveData[String(playerId)];
+				const baseline = baselines.get(playerId);
+				const playerInfo = players[playerId];
+				if (!stats || !baseline) return;
+
+				const opponentXG = stats.expected_goals_conceded || 1.5;
+				const fdr = getPlayerFDR(playerInfo?.team, pick.gameweek, fixturesByGw);
+
+				const playerLuck = calculatePlayerGameweekLuck(
+					playerId,
+					playerInfo?.web_name || 'Unknown',
+					pick.gameweek,
+					stats,
+					baseline,
+					opponentXG,
+					fdr
+				);
+
+				// Aggregate by component
+				components.appearance += playerLuck.appearance.points;
+				components.goals += playerLuck.goals.points;
+				components.assists += playerLuck.assists.points;
+				components.cleanSheets += playerLuck.cleanSheet.points;
+				components.goalsConceded += playerLuck.goalsConceded.points;
+				components.bonus += playerLuck.bonus.points;
+				components.saves += playerLuck.saves.points;
+				components.rareEvents += playerLuck.yellowCards.points +
+					playerLuck.redCards.points +
+					playerLuck.ownGoals.points +
+					playerLuck.penaltiesMissed.points +
+					playerLuck.penaltiesSaved.points;
+
+				gwLuck += playerLuck.totalLuck;
+				totalLuck += playerLuck.totalLuck;
+			};
+
+			// Process starting XI (excluding those who were subbed off)
+			for (const player of startingXI) {
+				if (playersWhoWentOff.has(player.element)) continue;
+				processPlayerLuck(player.element);
+			}
+
+			// Process auto-subs who came on
+			for (const sub of autoSubs) {
+				processPlayerLuck(sub.element_in);
+			}
+
+			gameweeks.push({ gameweek: pick.gameweek, luck: Math.round(gwLuck * 10) / 10 });
+		}
+
+		// Round all components
+		Object.keys(components).forEach(key => {
+			components[key as keyof typeof components] = Math.round(components[key as keyof typeof components] * 10) / 10;
+		});
+
+		return {
+			managerId: entry.entry_id!,
+			managerName,
+			totalLuck: Math.round(totalLuck * 10) / 10,
+			components,
+			gameweeks
+		};
+	}).sort((a, b) => b.totalLuck - a.totalLuck);
+
+	return {
+		clinicalFinisher,
+		assistLuck,
+		bonusMagnet,
+		smashAndGrab,
+		nearlyMan,
+		oneManArmy,
+		greatWall,
+		autoSubLottery,
+		consistency,
+		ceilingFloor,
+		robberies,
+		luckBreakdown
+	};
+}
+
+// Generate weekly banter using Gemini API
+async function generateWeeklyBanter(
+	currentGameweek: number,
+	standings: Standing[],
+	weeklyAwards: GameweekAwards[],
+	matches: Match[],
+	funStats: ReturnType<typeof calculateFunStats> | null,
+	entries: LeagueDetails['league_entries']
+): Promise<WeeklyBanter | null> {
+	if (!env.GEMINI_API_KEY) {
+		console.warn('GEMINI_API_KEY not set, skipping banter generation');
+		return null;
+	}
+
+	const currentAwards = weeklyAwards.find(w => w.gameweek === currentGameweek);
+	const gwMatches = matches.filter(m => m.event === currentGameweek && m.finished);
+
+	// Build match results summary
+	const entryLookup = new Map(entries.map(e => [e.id, e]));
+	const matchResults = gwMatches.map(m => {
+		const e1 = entryLookup.get(m.league_entry_1);
+		const e2 = entryLookup.get(m.league_entry_2);
+		const name1 = e1 ? `${e1.player_first_name || ''} ${e1.player_last_name || ''}`.trim() : 'Unknown';
+		const name2 = e2 ? `${e2.player_first_name || ''} ${e2.player_last_name || ''}`.trim() : 'Unknown';
+		const score1 = m.league_entry_1_points;
+		const score2 = m.league_entry_2_points;
+		const margin = Math.abs(score1 - score2);
+		const winner = score1 > score2 ? name1 : score2 > score1 ? name2 : null;
+		return { name1, name2, score1, score2, margin, winner };
+	});
+
+	// Get this week's robberies
+	const gwRobberies = funStats?.robberies?.flatMap(mr =>
+		mr.robberies.filter(r => r.gameweek === currentGameweek).map(r => ({
+			victim: mr.managerName,
+			culprit: r.opponentName,
+			player: r.culprit.playerName,
+			luck: Math.round(r.theirTotalLuck),
+			rating: r.robberyRating
+		}))
+	) || [];
+
+	// Build the prompt
+	const prompt = `You are the witty commentator for a fantasy football draft league called "Big at the Back". Write a SHORT, punchy recap of Gameweek ${currentGameweek} in 2-4 sentences max.
+
+CONTEXT:
+- Current Standings (top 3): ${standings.slice(0, 3).map((s, i) => `${i + 1}. ${s.player_name} (${s.total} pts)`).join(', ')}
+- Manager of the Week: ${currentAwards?.managerOfTheWeek.managerName} with ${currentAwards?.managerOfTheWeek.value} points
+- Bench Blunder: ${currentAwards?.benchBlunder.managerName} left ${currentAwards?.benchBlunder.value} points on bench
+${currentAwards?.closestCall ? `- Closest match: ${currentAwards.closestCall.winner} beat ${currentAwards.closestCall.loser} by just ${currentAwards.closestCall.margin} points` : ''}
+${gwRobberies.length > 0 ? `- Robberies: ${gwRobberies.map(r => `${r.culprit} robbed ${r.victim} thanks to ${r.player} (${'⭐'.repeat(r.rating)} robbery)`).join('; ')}` : ''}
+
+MATCH RESULTS:
+${matchResults.map(m => `${m.name1} ${m.score1} - ${m.score2} ${m.name2}${m.margin <= 3 ? ' (CLOSE!)' : m.margin >= 30 ? ' (DEMOLITION)' : ''}`).join('\n')}
+
+STYLE: Be playful but brutal. Mock poor decisions. Celebrate fluky wins. Use British football banter. Reference specific managers and scores. Keep it under 300 characters.`;
+
+	try {
+		const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + env.GEMINI_API_KEY, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				contents: [{ parts: [{ text: prompt }] }],
+				generationConfig: {
+					temperature: 0.9,
+					maxOutputTokens: 150
+				}
+			})
+		});
+
+		if (!response.ok) {
+			console.error('Gemini API error:', response.status, await response.text());
+			return null;
+		}
+
+		const data = await response.json();
+		const message = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+		if (!message) {
+			console.error('No message in Gemini response');
+			return null;
+		}
+
+		return {
+			gameweek: currentGameweek,
+			message,
+			generatedAt: new Date().toISOString()
+		};
+	} catch (error) {
+		console.error('Error calling Gemini API:', error);
+		return null;
+	}
 }
 
 export const load: PageServerLoad = async ({ fetch }) => {
@@ -451,15 +1818,61 @@ export const load: PageServerLoad = async ({ fetch }) => {
 		// Fetch detailed data for each manager
 		const entries = leagueDetails.league_entries.filter((e) => e.entry_id);
 
-		// Fetch live event data for all completed gameweeks (for bench points calculation)
-		const liveDataMap = new Map<number, Record<string, { total_points: number }>>();
+		// Fetch live event data for all completed gameweeks (for bench points and fun stats)
+		interface PlayerGWStats {
+			total_points: number;
+			minutes: number;
+			goals_scored: number;
+			assists: number;
+			clean_sheets: number;
+			goals_conceded: number;
+			bonus: number;
+			bps: number;
+			expected_goals: number;
+			expected_assists: number;
+			expected_goal_involvements: number;
+			expected_goals_conceded: number;
+			// Additional fields for holistic luck calculation
+			saves: number;
+			yellow_cards: number;
+			red_cards: number;
+			own_goals: number;
+			penalties_saved: number;
+			penalties_missed: number;
+		}
+		const liveDataMap = new Map<number, Record<string, PlayerGWStats>>();
 		const completedGameweeks = bootstrap.events?.filter(e => e.finished).map(e => e.id) || [];
 
 		const liveDataPromises = completedGameweeks.map(async (gw) => {
 			try {
 				const res = await fetch(`https://draft.premierleague.com/api/event/${gw}/live`);
 				const data = await res.json();
-				return { gw, elements: data.elements || {} };
+				// Extract full stats for each player
+				const elements: Record<string, PlayerGWStats> = {};
+				for (const [id, player] of Object.entries(data.elements || {})) {
+					const stats = (player as any).stats || {};
+					elements[id] = {
+						total_points: stats.total_points || 0,
+						minutes: stats.minutes || 0,
+						goals_scored: stats.goals_scored || 0,
+						assists: stats.assists || 0,
+						clean_sheets: stats.clean_sheets || 0,
+						goals_conceded: stats.goals_conceded || 0,
+						bonus: stats.bonus || 0,
+						bps: stats.bps || 0,
+						expected_goals: parseFloat(stats.expected_goals) || 0,
+						expected_assists: parseFloat(stats.expected_assists) || 0,
+						expected_goal_involvements: parseFloat(stats.expected_goal_involvements) || 0,
+						expected_goals_conceded: parseFloat(stats.expected_goals_conceded) || 0,
+						saves: stats.saves || 0,
+						yellow_cards: stats.yellow_cards || 0,
+						red_cards: stats.red_cards || 0,
+						own_goals: stats.own_goals || 0,
+						penalties_saved: stats.penalties_saved || 0,
+						penalties_missed: stats.penalties_missed || 0,
+					};
+				}
+				return { gw, elements };
 			} catch {
 				return { gw, elements: {} };
 			}
@@ -514,88 +1927,68 @@ export const load: PageServerLoad = async ({ fetch }) => {
 					const historyArray = history?.history || [];
 					const recent5 = historyArray.slice(-5);
 
-					// Get GW1 (startGameweek) picks for "what if no transfers" calculation
-					const gw1Picks = picks.find(p => p.gameweek === startGameweek)?.data?.picks || [];
+					// Function to calculate optimal starting XI points from a squad
+					// Assumes best possible team selection (1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD)
+					function calculateOptimalPoints(squadPlayerIds: number[], liveData: Record<string, any>): number {
+						if (squadPlayerIds.length === 0) return 0;
 
-					// Function to simulate auto-subs and calculate points for a squad in a given GW
-					function simulateSquadPoints(squadPicks: Pick[], liveData: Record<string, any>): number {
-						if (squadPicks.length === 0) return 0;
-
-						const startingXI = squadPicks.filter(p => p.position <= 11).sort((a, b) => a.position - b.position);
-						const bench = squadPicks.filter(p => p.position > 11).sort((a, b) => a.position - b.position);
-
-						// Track which positions are filled and their points
-						const squad: { element: number; points: number; minutes: number; position: number; playerType: number }[] = [];
-
-						// Add starting XI players
-						for (const pick of startingXI) {
-							const playerLive = liveData[String(pick.element)];
-							const playerInfo = players[pick.element];
-							const minutes = playerLive?.stats?.minutes || 0;
-							const points = playerLive?.stats?.total_points || 0;
-							squad.push({
-								element: pick.element,
-								points,
-								minutes,
-								position: pick.position,
-								playerType: playerInfo?.element_type || 0
-							});
-						}
-
-						// Count current formation
-						const getFormation = () => {
-							const playing = squad.filter(p => p.minutes > 0);
+						// Get player data with points for this GW
+						const squadWithStats = squadPlayerIds.map(playerId => {
+							const playerInfo = players[playerId];
+							const playerLive = liveData[String(playerId)];
 							return {
-								gk: playing.filter(p => p.playerType === 1).length,
-								def: playing.filter(p => p.playerType === 2).length,
-								mid: playing.filter(p => p.playerType === 3).length,
-								fwd: playing.filter(p => p.playerType === 4).length
+								id: playerId,
+								type: playerInfo?.element_type || 0, // 1=GK, 2=DEF, 3=MID, 4=FWD
+								points: playerLive?.total_points || 0,
+								minutes: playerLive?.minutes || 0
 							};
-						};
+						}).filter(p => p.minutes > 0); // Only players who played
 
-						// Try auto-subs for players with 0 minutes
-						for (let i = 0; i < squad.length; i++) {
-							if (squad[i].minutes === 0) {
-								// Find a valid sub
-								for (const sub of bench) {
-									const subLive = liveData[String(sub.element)];
-									const subInfo = players[sub.element];
-									const subMinutes = subLive?.stats?.minutes || 0;
+						// Separate by position
+						const gks = squadWithStats.filter(p => p.type === 1).sort((a, b) => b.points - a.points);
+						const defs = squadWithStats.filter(p => p.type === 2).sort((a, b) => b.points - a.points);
+						const mids = squadWithStats.filter(p => p.type === 3).sort((a, b) => b.points - a.points);
+						const fwds = squadWithStats.filter(p => p.type === 4).sort((a, b) => b.points - a.points);
 
-									if (subMinutes === 0) continue; // Sub didn't play
+						// Must have 1 GK
+						const selectedGK = gks[0];
+						if (!selectedGK) return 0; // No GK played
 
-									// Check if already used this sub
-									if (squad.some(s => s.element === sub.element)) continue;
+						// Find optimal formation (3-5 DEF, 2-5 MID, 1-3 FWD, total outfield = 10)
+						// Try all valid formations and pick the one with max points
+						let maxPoints = 0;
+						const formations = [
+							[3, 5, 2], [3, 4, 3], [4, 4, 2], [4, 3, 3], [5, 4, 1], [5, 3, 2], [4, 5, 1], [3, 6, 1]
+						]; // [DEF, MID, FWD] - note 3-6-1 is invalid but we'll filter
 
-									// Check formation validity
-									const formation = getFormation();
-									const subType = subInfo?.element_type || 0;
-									const outType = squad[i].playerType;
+						for (const [numDef, numMid, numFwd] of formations) {
+							// Check if we have enough players for this formation
+							if (defs.length < numDef || mids.length < numMid || fwds.length < numFwd) continue;
+							// Validate formation rules
+							if (numDef < 3 || numDef > 5) continue;
+							if (numMid < 2 || numMid > 5) continue;
+							if (numFwd < 1 || numFwd > 3) continue;
+							if (numDef + numMid + numFwd !== 10) continue;
 
-									// Minimum formation: 1 GK, 3 DEF, 2 MID, 1 FWD
-									let valid = true;
-									if (outType === 1 && subType !== 1) valid = false; // GK can only be replaced by GK
-									if (outType === 2 && formation.def <= 3 && subType !== 2) valid = false;
-									if (outType === 3 && formation.mid <= 2 && subType !== 3) valid = false;
-									if (outType === 4 && formation.fwd <= 1 && subType !== 4) valid = false;
+							const formationPoints = selectedGK.points +
+								defs.slice(0, numDef).reduce((sum, p) => sum + p.points, 0) +
+								mids.slice(0, numMid).reduce((sum, p) => sum + p.points, 0) +
+								fwds.slice(0, numFwd).reduce((sum, p) => sum + p.points, 0);
 
-									if (valid) {
-										squad[i] = {
-											element: sub.element,
-											points: subLive?.stats?.total_points || 0,
-											minutes: subMinutes,
-											position: squad[i].position,
-											playerType: subType
-										};
-										break;
-									}
-								}
-							}
+							maxPoints = Math.max(maxPoints, formationPoints);
 						}
 
-						// Sum points for players who played (or their subs)
-						return squad.reduce((sum, p) => sum + (p.minutes > 0 ? p.points : 0), 0);
+						return maxPoints;
 					}
+
+					// Get GW1 squad (all 15 players)
+					const gw1PicksData = picks.find(p => p.gameweek === startGameweek)?.data?.picks || [];
+					const gw1Squad = new Set(gw1PicksData.map(p => p.element));
+
+					// Get manager's transfers to track squad evolution
+					const managerTransactions = transactions.filter(
+						t => t.entry === entry.entry_id && t.result === 'a'
+					).sort((a, b) => a.event - b.event);
 
 					// Calculate points from picks + live data for each gameweek
 					const pointsByGameweek = picks.map((pick) => {
@@ -614,33 +2007,77 @@ export const load: PageServerLoad = async ({ fetch }) => {
 						const startingXI = pick.data.picks.filter((p) => p.position <= 11);
 						const benchPicks = pick.data.picks.filter((p) => p.position > 11);
 
-						// Sum up bench player points
-						const benchPoints = benchPicks.reduce((sum, benchPlayer) => {
-							const playerLive = liveData[String(benchPlayer.element)];
-							return sum + (playerLive?.stats?.total_points || 0);
-						}, 0);
+						// Get auto-subs that happened this gameweek
+						const autoSubs = pick.data.subs || [];
+						const playersWhoCameOn = new Set(autoSubs.map(s => s.element_in));
+
+						// Calculate WASTED bench points
+						// Waste = how many more points you'd have if you started bench over worst starters
+						let benchPoints = 0;
+
+						// Separate bench into GK and outfield
+						const benchGK = benchPicks.find(p => players[p.element]?.element_type === 1);
+						const benchOutfield = benchPicks.filter(p => players[p.element]?.element_type !== 1);
+
+						// GK waste: bench GK points - starting GK points (if positive and GK played)
+						if (benchGK && !playersWhoCameOn.has(benchGK.element)) {
+							const benchGKPoints = liveData[String(benchGK.element)]?.total_points || 0;
+							const startingGK = startingXI.find(p => players[p.element]?.element_type === 1);
+							if (startingGK) {
+								const startingGKLive = liveData[String(startingGK.element)];
+								const startingGKMinutes = startingGKLive?.minutes || 0;
+								const startingGKPoints = startingGKLive?.total_points || 0;
+								// Only count as waste if starting GK played
+								if (startingGKMinutes > 0) {
+									benchPoints += Math.max(0, benchGKPoints - startingGKPoints);
+								}
+							}
+						}
+
+						// Outfield waste: bench outfield total - lowest N starters total
+						const outfieldBenchWhoDidntComeOn = benchOutfield.filter(p => !playersWhoCameOn.has(p.element));
+						if (outfieldBenchWhoDidntComeOn.length > 0) {
+							// Sum bench outfield points
+							const benchOutfieldTotal = outfieldBenchWhoDidntComeOn.reduce((sum, p) => {
+								return sum + (liveData[String(p.element)]?.total_points || 0);
+							}, 0);
+
+							// Get outfield starters who played, sorted by points ascending
+							const outfieldStarters = startingXI
+								.filter(p => players[p.element]?.element_type !== 1)
+								.map(p => ({
+									element: p.element,
+									points: liveData[String(p.element)]?.total_points || 0,
+									minutes: liveData[String(p.element)]?.minutes || 0
+								}))
+								.filter(p => p.minutes > 0) // Only those who played
+								.sort((a, b) => a.points - b.points);
+
+							// Take the N lowest-scoring starters (N = number of bench outfield who didn't come on)
+							const lowestStarters = outfieldStarters.slice(0, outfieldBenchWhoDidntComeOn.length);
+							const lowestStartersTotal = lowestStarters.reduce((sum, p) => sum + p.points, 0);
+
+							// Waste is the difference (if positive)
+							benchPoints += Math.max(0, benchOutfieldTotal - lowestStartersTotal);
+						}
 
 						// Calculate squad points by position (for starting XI only)
 						const squadPoints = { Goalkeeper: 0, Defender: 0, Midfielder: 0, Forward: 0 };
 						startingXI.forEach((starter) => {
 							const playerLive = liveData[String(starter.element)];
 							const playerInfo = players[starter.element];
-							const points = playerLive?.stats?.total_points || 0;
+							const points = playerLive?.total_points || 0;
 							const position = playerInfo?.position_name as keyof typeof squadPoints;
 							if (position && squadPoints.hasOwnProperty(position)) {
 								squadPoints[position] += points;
 							}
 						});
 
-						// Calculate what GW1 squad would have scored this week (with auto-subs)
-						const gw1SquadPoints = simulateSquadPoints(gw1Picks, liveData);
-
 						return {
 							gameweek: pick.gameweek,
 							benchPoints,
 							benchPlayers: benchPicks.length,
-							squadPoints,
-							gw1SquadPoints
+							squadPoints
 						};
 					});
 
@@ -658,27 +2095,48 @@ export const load: PageServerLoad = async ({ fetch }) => {
 					};
 					const totalSquadPoints = Object.values(squadStrength).reduce((a, b) => a + b, 0);
 
-					// Calculate transfer value: actual points vs what GW1 squad would have scored
-					const actualTotal = historyArray.reduce((sum, h) => sum + h.points, 0);
-					const gw1SquadTotal = pointsByGameweek.reduce((sum, gw) => sum + gw.gw1SquadPoints, 0);
-					const transferValue = actualTotal - gw1SquadTotal;
+					// Calculate transfer value using optimal play assumption
+					// Track actual squad week by week, applying transfers
+					let currentSquad = new Set(gw1Squad); // Start with GW1 squad
+					let gw1SquadTotal = 0;
+					let actualOptimalTotal = 0;
 
-					// Calculate individual transfer impact
-					const managerTransactions = transactions.filter(
-						t => t.entry === entry.entry_id && t.result === 'a'
-					);
+					// Sort gameweeks for proper transfer application
+					const sortedGameweeks = [...completedGameweeks].filter(gw => gw >= startGameweek).sort((a, b) => a - b);
 
+					for (const gw of sortedGameweeks) {
+						const liveData = liveDataMap.get(gw);
+						if (!liveData) continue;
+
+						// Apply any transfers that happened this gameweek to current squad
+						const gwTransfers = managerTransactions.filter(t => t.event === gw);
+						for (const transfer of gwTransfers) {
+							currentSquad.delete(transfer.element_out);
+							currentSquad.add(transfer.element_in);
+						}
+
+						// Calculate optimal points for both squads this GW
+						const gw1Optimal = calculateOptimalPoints(Array.from(gw1Squad), liveData);
+						const actualOptimal = calculateOptimalPoints(Array.from(currentSquad), liveData);
+
+						gw1SquadTotal += gw1Optimal;
+						actualOptimalTotal += actualOptimal;
+					}
+
+					const transferValue = actualOptimalTotal - gw1SquadTotal;
+
+					// Calculate individual transfer impact (using optimal play)
 					const transferAnalyses: TransferAnalysis[] = managerTransactions.map(t => {
 						const playerIn = players[t.element_in];
 						const playerOut = players[t.element_out];
 
-						// Find when player_in was next traded away (to avoid double-counting)
+						// Find when player_in was next traded away
 						const nextTradeOut = managerTransactions.find(
 							other => other.element_out === t.element_in && other.event > t.event
 						);
 						const gainedUntilGw = nextTradeOut ? nextTradeOut.event : Infinity;
 
-						// Find when player_out was traded back in (to avoid double-counting)
+						// Find when player_out was traded back in
 						const nextTradeIn = managerTransactions.find(
 							other => other.element_in === t.element_out && other.event > t.event
 						);
@@ -687,17 +2145,17 @@ export const load: PageServerLoad = async ({ fetch }) => {
 						let pointsGained = 0;
 						let pointsLost = 0;
 
+						// For individual transfers, count all points (not just optimal XI)
+						// This shows the raw player performance comparison
 						for (const gw of completedGameweeks) {
 							if (gw >= t.event) {
 								const liveData = liveDataMap.get(gw);
 								if (liveData) {
-									// Only count gained points while player was on the team
 									if (gw < gainedUntilGw) {
-										pointsGained += liveData[String(t.element_in)]?.stats?.total_points || 0;
+										pointsGained += liveData[String(t.element_in)]?.total_points || 0;
 									}
-									// Only count lost points until player was re-acquired
 									if (gw < lostUntilGw) {
-										pointsLost += liveData[String(t.element_out)]?.stats?.total_points || 0;
+										pointsLost += liveData[String(t.element_out)]?.total_points || 0;
 									}
 								}
 							}
@@ -723,11 +2181,10 @@ export const load: PageServerLoad = async ({ fetch }) => {
 						};
 					}).sort((a, b) => b.netImpact - a.netImpact); // Sort best first
 
-					// Get only recent 5 picks for display
+					// Get all picks for display (sorted by gameweek descending)
 					const recentPicks = picks
 						.filter((p) => p.data !== null)
-						.sort((a, b) => b.gameweek - a.gameweek)
-						.slice(0, 5);
+						.sort((a, b) => b.gameweek - a.gameweek);
 
 					return {
 						...entry,
@@ -769,11 +2226,23 @@ export const load: PageServerLoad = async ({ fetch }) => {
 			})
 		);
 
+		// Build player baselines for luck calculations (needed by multiple functions)
+		const playerBaselines = buildPlayerBaselines(players);
+
 		// Calculate H2H data
 		const h2hMatrix = buildH2HMatrix(leagueDetails.matches, leagueDetails.league_entries);
 		const h2hFixtures = processFixtures(leagueDetails.matches, leagueDetails.league_entries);
 		const h2hStats = calculateRivalryStats(h2hFixtures);
-		const h2hLuckRaw = await calculateLuckIndex(detailedEntries, leagueDetails.matches, players, leagueDetails.league_entries, standings, fetch);
+		const { luck: h2hLuckRaw, fixturesByGw } = await calculateLuckIndex(
+			detailedEntries,
+			leagueDetails.matches,
+			players,
+			leagueDetails.league_entries,
+			standings,
+			fetch,
+			playerBaselines,
+			liveDataMap
+		);
 
 		// Calculate centered luck (relative to league average)
 		const avgLuck = h2hLuckRaw.reduce((sum, m) => sum + m.seasonLuck, 0) / h2hLuckRaw.length;
@@ -781,6 +2250,47 @@ export const load: PageServerLoad = async ({ fetch }) => {
 			...m,
 			centeredLuck: Math.round((m.seasonLuck - avgLuck) * 10) / 10
 		}));
+
+		// Calculate nemesis/bunny and streaks
+		const nemesisBunny = calculateNemesisBunny(h2hMatrix, leagueDetails.league_entries);
+		const streaks = calculateStreaks(leagueDetails.matches, leagueDetails.league_entries);
+
+		// Calculate weekly awards
+		const weeklyAwards = calculateWeeklyAwards(
+			detailedEntries,
+			leagueDetails.matches,
+			liveDataMap,
+			completedGameweeks,
+			players
+		);
+
+		// Calculate "would have beat" data
+		const wouldHaveBeat = calculateWouldHaveBeat(
+			detailedEntries,
+			leagueDetails.matches,
+			completedGameweeks
+		);
+
+		// Calculate fun stats
+		const funStats = calculateFunStats(
+			detailedEntries,
+			liveDataMap,
+			leagueDetails.matches,
+			players,
+			startGameweek,
+			playerBaselines,
+			fixturesByGw
+		);
+
+		// Generate weekly banter using Gemini
+		const weeklyBanter = await generateWeeklyBanter(
+			currentGameweek,
+			standings,
+			weeklyAwards,
+			leagueDetails.matches,
+			funStats,
+			leagueDetails.league_entries
+		);
 
 		return {
 			league: {
@@ -801,8 +2311,14 @@ export const load: PageServerLoad = async ({ fetch }) => {
 				matrix: h2hMatrix,
 				fixtures: h2hFixtures,
 				luck: h2hLuck,
-				stats: h2hStats
-			}
+				stats: h2hStats,
+				nemesisBunny,
+				streaks,
+				wouldHaveBeat
+			},
+			funStats,
+			weeklyAwards,
+			weeklyBanter
 		};
 	} catch (error) {
 		console.error('Error loading page data:', error);

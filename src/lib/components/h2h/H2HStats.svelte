@@ -2,20 +2,17 @@
 	import * as Tabs from "$lib/components/ui/tabs";
 	import H2HMatrix from "./H2HMatrix.svelte";
 	import FixtureHistory from "./FixtureHistory.svelte";
-	import LuckIndex from "./LuckIndex.svelte";
-	import { Grid3x3, Calendar, Sparkles } from "@lucide/svelte";
-	import type { H2HRecord, MatchResult, ManagerLuck, RivalryStats } from "$lib/types/fpl";
+	import { Grid3x3, Calendar } from "@lucide/svelte";
+	import type { H2HRecord, MatchResult, RivalryStats } from "$lib/types/fpl";
 
 	let {
 		matrix = [],
 		fixtures = [],
-		luck = [],
 		stats,
 		entries = []
 	}: {
 		matrix: H2HRecord[];
 		fixtures: MatchResult[];
-		luck: ManagerLuck[];
 		stats: RivalryStats;
 		entries: any[];
 	} = $props();
@@ -37,13 +34,6 @@
 			<Calendar class="w-4 h-4 mr-2" />
 			Fixtures
 		</Tabs.Trigger>
-		<Tabs.Trigger
-			value="luck"
-			class="font-mono text-sm uppercase tracking-wide rounded data-[state=active]:bg-card data-[state=active]:text-accent data-[state=active]:shadow-sm px-4 py-2"
-		>
-			<Sparkles class="w-4 h-4 mr-2" />
-			Luck
-		</Tabs.Trigger>
 	</Tabs.List>
 
 	<Tabs.Content value="matrix">
@@ -52,9 +42,5 @@
 
 	<Tabs.Content value="fixtures">
 		<FixtureHistory {fixtures} {stats} />
-	</Tabs.Content>
-
-	<Tabs.Content value="luck">
-		<LuckIndex {luck} />
 	</Tabs.Content>
 </Tabs.Root>

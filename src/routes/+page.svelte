@@ -3,23 +3,26 @@
 	import FormCharts from '$lib/components/FormCharts.svelte';
 	import BenchPointsTracker from '$lib/components/BenchPointsTracker.svelte';
 	import WeeklyPerformance from '$lib/components/WeeklyPerformance.svelte';
-	import ManagerComparison from '$lib/components/ManagerComparison.svelte';
 	import SquadAnalysis from '$lib/components/SquadAnalysis.svelte';
 	import LeagueStandings from '$lib/components/shared/LeagueStandings.svelte';
 	import LeagueInfo from '$lib/components/shared/LeagueInfo.svelte';
 	import ManagerGrid from '$lib/components/shared/ManagerGrid.svelte';
 	import H2HStats from '$lib/components/h2h/H2HStats.svelte';
+	import RivalriesCard from '$lib/components/h2h/RivalriesCard.svelte';
+	import StreaksCard from '$lib/components/h2h/StreaksCard.svelte';
 	import TransferValue from '$lib/components/TransferValue.svelte';
-	import * as Card from "$lib/components/ui/card";
+	import TransferRegrets from '$lib/components/TransferRegrets.svelte';
+	import LuckTab from '$lib/components/luck/LuckTab.svelte';
+	import WeeklyAwards from '$lib/components/WeeklyAwards.svelte';
+	import WeeklyBanter from '$lib/components/WeeklyBanter.svelte';
+	import FunStatCard from '$lib/components/stats/FunStatCard.svelte';
 	import * as Tabs from "$lib/components/ui/tabs";
 	import {
 		LayoutDashboard,
 		Swords,
 		TrendingUp,
-		Armchair,
-		CalendarDays,
-		Target,
-		Users
+		Users,
+		Sparkles
 	} from '@lucide/svelte';
 
 	let { data }: PageProps = $props();
@@ -100,32 +103,11 @@
 					<span class="hidden md:inline">H2H</span>
 				</Tabs.Trigger>
 				<Tabs.Trigger
-					value="form"
+					value="performance"
 					class="font-mono text-sm uppercase tracking-wide rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-accent data-[state=active]:shadow-none bg-transparent px-4 py-3"
 				>
 					<TrendingUp class="w-4 h-4 mr-2" />
-					<span class="hidden md:inline">Form</span>
-				</Tabs.Trigger>
-				<Tabs.Trigger
-					value="bench"
-					class="font-mono text-sm uppercase tracking-wide rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-accent data-[state=active]:shadow-none bg-transparent px-4 py-3"
-				>
-					<Armchair class="w-4 h-4 mr-2" />
-					<span class="hidden md:inline">Bench</span>
-				</Tabs.Trigger>
-				<Tabs.Trigger
-					value="weekly"
-					class="font-mono text-sm uppercase tracking-wide rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-accent data-[state=active]:shadow-none bg-transparent px-4 py-3"
-				>
-					<CalendarDays class="w-4 h-4 mr-2" />
-					<span class="hidden md:inline">Weekly</span>
-				</Tabs.Trigger>
-				<Tabs.Trigger
-					value="comparison"
-					class="font-mono text-sm uppercase tracking-wide rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-accent data-[state=active]:shadow-none bg-transparent px-4 py-3"
-				>
-					<Target class="w-4 h-4 mr-2" />
-					<span class="hidden md:inline">Compare</span>
+					<span class="hidden md:inline">Performance</span>
 				</Tabs.Trigger>
 				<Tabs.Trigger
 					value="squads"
@@ -134,8 +116,16 @@
 					<Users class="w-4 h-4 mr-2" />
 					<span class="hidden md:inline">Squads</span>
 				</Tabs.Trigger>
+				<Tabs.Trigger
+					value="luck"
+					class="font-mono text-sm uppercase tracking-wide rounded-none border-b-2 border-transparent data-[state=active]:border-accent data-[state=active]:text-accent data-[state=active]:shadow-none bg-transparent px-4 py-3"
+				>
+					<Sparkles class="w-4 h-4 mr-2" />
+					<span class="hidden md:inline">Luck</span>
+				</Tabs.Trigger>
 			</Tabs.List>
 
+			<!-- Overview: Standings, League Info, Weekly Awards, Manager Grid -->
 			<Tabs.Content value="overview" class="space-y-8">
 				<LeagueStandings standings={data.standings} />
 
@@ -145,39 +135,106 @@
 					startGameweek={data.league.start_event}
 				/>
 
-				<TransferValue entries={data.league.entries} />
+				<WeeklyAwards awards={data.weeklyAwards} currentGameweek={data.currentGameweek} />
+
+				<WeeklyBanter banter={data.weeklyBanter} />
 
 				<ManagerGrid entries={data.league.entries} />
 			</Tabs.Content>
 
+			<!-- H2H: Matrix, Fixtures, Rivalries, Streaks -->
 			<Tabs.Content value="h2h">
-				<H2HStats
-					matrix={data.h2h.matrix}
-					fixtures={data.h2h.fixtures}
-					luck={data.h2h.luck}
-					stats={data.h2h.stats}
-					entries={data.league.entries}
-				/>
+				<div class="space-y-8">
+					<H2HStats
+						matrix={data.h2h.matrix}
+						fixtures={data.h2h.fixtures}
+						stats={data.h2h.stats}
+						entries={data.league.entries}
+					/>
+
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+						<RivalriesCard rivalries={data.h2h.nemesisBunny} />
+						<StreaksCard streaks={data.h2h.streaks} />
+					</div>
+				</div>
 			</Tabs.Content>
 
-			<Tabs.Content value="form">
-				<FormCharts entries={data.league.entries} />
+			<!-- Performance: Form, Weekly, Bench, Transfer Value, Consistency stats -->
+			<Tabs.Content value="performance">
+				<div class="space-y-8">
+					<FormCharts entries={data.league.entries} />
+
+					<WeeklyPerformance entries={data.league.entries} startGameweek={data.startGameweek} currentGameweek={data.currentGameweek} />
+
+					<TransferValue entries={data.league.entries} />
+
+					<TransferRegrets entries={data.league.entries} />
+
+					<BenchPointsTracker entries={data.league.entries} />
+
+					{#if data.funStats}
+						<div class="space-y-4">
+							<h3 class="font-serif text-lg font-semibold text-foreground">Consistency & Efficiency</h3>
+							<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+								<FunStatCard
+									title="Mr. Consistent"
+									description="Weekly score variance (lower = more consistent)"
+									topLabel="Consistent"
+									bottomLabel="Rollercoaster"
+									stats={data.funStats.consistency}
+								/>
+								<FunStatCard
+									title="The Ceiling Raiser"
+									description="Best GW / Worst GW"
+									topLabel="Highest Range"
+									bottomLabel="Lowest Range"
+									stats={data.funStats.ceilingFloor}
+								/>
+								<FunStatCard
+									title="The Auto-Sub Lottery"
+									description="Points left on the bench"
+									topLabel="Wasteful"
+									bottomLabel="Efficient"
+									stats={data.funStats.autoSubLottery}
+								/>
+							</div>
+						</div>
+					{/if}
+				</div>
 			</Tabs.Content>
 
-			<Tabs.Content value="bench">
-				<BenchPointsTracker entries={data.league.entries} />
-			</Tabs.Content>
-
-			<Tabs.Content value="weekly">
-				<WeeklyPerformance entries={data.league.entries} startGameweek={data.startGameweek} currentGameweek={data.currentGameweek} />
-			</Tabs.Content>
-
-			<Tabs.Content value="comparison">
-				<ManagerComparison entries={data.league.entries} />
-			</Tabs.Content>
-
+			<!-- Squads: Squad Analysis, One-Man Army, Great Wall -->
 			<Tabs.Content value="squads">
-				<SquadAnalysis entries={data.league.entries} players={data.players} currentGameweek={data.currentGameweek} />
+				<div class="space-y-8">
+					<SquadAnalysis entries={data.league.entries} players={data.players} currentGameweek={data.currentGameweek} />
+
+					{#if data.funStats}
+						<div class="space-y-4">
+							<h3 class="font-serif text-lg font-semibold text-foreground">Squad Composition</h3>
+							<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+								<FunStatCard
+									title="The One-Man Army"
+									description="% of points from top scorer"
+									topLabel="Dependent"
+									bottomLabel="Balanced"
+									stats={data.funStats.oneManArmy}
+								/>
+								<FunStatCard
+									title="The Great Wall"
+									description="Total clean sheets"
+									topLabel="Great Wall"
+									bottomLabel="Sieve"
+									stats={data.funStats.greatWall}
+								/>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</Tabs.Content>
+
+			<!-- Luck: All luck/variance metrics -->
+			<Tabs.Content value="luck">
+				<LuckTab luck={data.h2h.luck} funStats={data.funStats} wouldHaveBeat={data.h2h.wouldHaveBeat} />
 			</Tabs.Content>
 		</Tabs.Root>
 	</div>

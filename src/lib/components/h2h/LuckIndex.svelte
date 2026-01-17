@@ -2,6 +2,7 @@
 	import * as Card from "$lib/components/ui/card";
 	import { Switch } from "$lib/components/ui/switch";
 	import { Label } from "$lib/components/ui/label";
+	import { Button } from "$lib/components/ui/button";
 	import type { ManagerLuck } from "$lib/types/fpl";
 	import LuckLollipopChart from "./LuckLollipopChart.svelte";
 	import LuckAreaChart from "./LuckAreaChart.svelte";
@@ -9,6 +10,25 @@
 	let { luck = [] }: { luck: ManagerLuck[] } = $props();
 
 	let useCentered = $state(false);
+	let expandedManagers = $state(new Set<number>());
+	const DEFAULT_GW_COUNT = 5;
+
+	function toggleExpanded(managerId: number) {
+		if (expandedManagers.has(managerId)) {
+			expandedManagers.delete(managerId);
+		} else {
+			expandedManagers.add(managerId);
+		}
+		expandedManagers = new Set(expandedManagers); // trigger reactivity
+	}
+
+	function getDisplayedGameweeks(manager: ManagerLuck) {
+		const isExpanded = expandedManagers.has(manager.managerId);
+		if (isExpanded || manager.gameweeks.length <= DEFAULT_GW_COUNT) {
+			return manager.gameweeks;
+		}
+		return manager.gameweeks.slice(0, DEFAULT_GW_COUNT);
+	}
 
 	// Sort managers by luck for ranking (uses appropriate field based on mode)
 	const sortedByLuck = $derived(
@@ -50,7 +70,7 @@
 				<div>
 					<Card.Title class="font-serif text-2xl font-semibold text-foreground">Luck Index</Card.Title>
 					<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-						Season luck ranking (recent 5 GWs)
+						Season luck ranking
 					</Card.Description>
 				</div>
 				<div class="flex items-center gap-2">
@@ -64,7 +84,7 @@
 		<Card.Content>
 			<div class="mb-6 p-4 bg-muted/50 rounded border border-border">
 				<p class="font-mono text-xs text-muted-foreground leading-relaxed">
-					<span class="font-semibold text-foreground">How luck is calculated:</span> For each gameweek, we calculate an <span class="text-accent">expected score</span> using each player's <span class="text-foreground">average points</span> from the last 10 gameweeks, adjusted for <span class="text-foreground">fixture difficulty</span> (FDR 1-5 scale). Luck = Actual − Expected.
+					<span class="font-semibold text-foreground">How luck is calculated:</span> For each player, we calculate <span class="text-accent">expected points</span> using their <span class="text-foreground">season per-90 rates</span> (goals, assists, clean sheets, bonus, saves) adjusted for <span class="text-foreground">fixture difficulty</span>. We account for all 11 scoring components including defensive stats and negative events. Luck = Actual − Expected.
 					{#if useCentered}
 						<span class="text-accent">Relative mode</span> shows luck compared to league average.
 					{:else}
@@ -122,7 +142,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each manager.gameweeks as gw (gw.gameweek)}
+								{#each getDisplayedGameweeks(manager) as gw (gw.gameweek)}
 									<tr class="border-b border-border last:border-b-0">
 										<td class="py-1 px-2">
 											<span class="font-mono font-semibold text-foreground">{gw.gameweek}</span>
@@ -145,6 +165,22 @@
 										</td>
 									</tr>
 								{/each}
+								{#if manager.gameweeks.length > DEFAULT_GW_COUNT}
+									<tr>
+										<td colspan="5" class="py-2 px-2 text-center">
+											<Button
+												variant="ghost"
+												size="sm"
+												class="font-mono text-xs"
+												onclick={() => toggleExpanded(manager.managerId)}
+											>
+												{expandedManagers.has(manager.managerId)
+													? `Show less`
+													: `Show more (${manager.gameweeks.length - DEFAULT_GW_COUNT} more)`}
+											</Button>
+										</td>
+									</tr>
+								{/if}
 							</tbody>
 							<tfoot>
 								<tr class="border-t-2 border-border">

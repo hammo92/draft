@@ -286,9 +286,203 @@ export interface RivalryStats {
 	closestGame: { manager1: string; manager2: string; score: string; margin: number; gameweek: number } | null;
 }
 
+export interface NemesisBunny {
+	managerId: number;
+	managerName: string;
+	nemesis: {
+		opponentId: number;
+		opponentName: string;
+		wins: number;
+		losses: number;
+		draws: number;
+		record: string; // e.g., "0-3-1"
+	} | null;
+	bunny: {
+		opponentId: number;
+		opponentName: string;
+		wins: number;
+		losses: number;
+		draws: number;
+		record: string; // e.g., "4-0-0"
+	} | null;
+}
+
+export interface ManagerStreak {
+	managerId: number;
+	managerName: string;
+	currentStreak: {
+		type: 'W' | 'L' | 'D';
+		count: number;
+	};
+	longestWinStreak: number;
+	longestLossStreak: number;
+	currentForm: ('W' | 'L' | 'D')[]; // Last 5 results
+}
+
+export interface WeeklyAward {
+	managerId: number;
+	managerName: string;
+	value: number;
+	label: string;
+}
+
+export interface GameweekAwards {
+	gameweek: number;
+	managerOfTheWeek: WeeklyAward;
+	benchBlunder: WeeklyAward;
+	differentialKing: WeeklyAward | null; // Highest scorer from a player owned only by them
+	closestCall: { // Tightest H2H margin
+		winner: string;
+		loser: string;
+		margin: number;
+	} | null;
+}
+
+export interface WouldHaveBeatGW {
+	gameweek: number;
+	score: number;
+	wouldHaveBeaten: number; // How many managers you would have beaten
+	totalManagers: number;
+	actualOpponent: string;
+	actualResult: 'W' | 'L' | 'D';
+	unluckyDraw: boolean; // True if you would have beaten more managers than you lost to
+}
+
+export interface ManagerWouldHaveBeat {
+	managerId: number;
+	managerName: string;
+	gameweeks: WouldHaveBeatGW[];
+	totalUnluckyWeeks: number; // Weeks where you beat most managers but lost
+	averageRank: number; // Average weekly rank (1 = best)
+}
+
 export interface H2HData {
 	matrix: Map<string, H2HRecord>;
 	fixtures: MatchResult[];
 	luck: ManagerLuck[];
 	stats: RivalryStats;
+}
+
+// Fun Stats Types
+export interface PlayerGWStats {
+	total_points: number;
+	minutes: number;
+	goals_scored: number;
+	assists: number;
+	clean_sheets: number;
+	goals_conceded: number;
+	bonus: number;
+	bps: number;
+	expected_goals: number;
+	expected_assists: number;
+	expected_goal_involvements: number;
+	expected_goals_conceded: number;
+	// Additional fields for holistic luck calculation
+	saves: number;
+	yellow_cards: number;
+	red_cards: number;
+	own_goals: number;
+	penalties_saved: number;
+	penalties_missed: number;
+}
+
+export interface FunStatEntry {
+	managerId: number;
+	managerName: string;
+	value: number;
+	label: string;
+}
+
+export interface FunStats {
+	// H2H Tab
+	clinicalFinisher: FunStatEntry[];
+	assistLuck: FunStatEntry[];
+	bonusMagnet: FunStatEntry[];
+	smashAndGrab: FunStatEntry[];
+	nearlyMan: FunStatEntry[];
+
+	// Overview Tab
+	oneManArmy: FunStatEntry[];
+	greatWall: FunStatEntry[];
+
+	// Bench Tab
+	autoSubLottery: FunStatEntry[];
+
+	// Form Tab
+	consistency: FunStatEntry[];
+	ceilingFloor: FunStatEntry[];
+
+	// Robbery Report
+	robberies: ManagerRobberies[];
+
+	// Luck Breakdown (holistic points-based luck by component)
+	luckBreakdown: ManagerLuckBreakdown[];
+}
+
+export interface RobberyCulprit {
+	playerId: number;
+	playerName: string;
+	goals: number;
+	assists: number;
+	expectedGoals: number; // Based on season per-90 average
+	expectedAssists: number; // Based on season per-90 average
+	actualPoints: number;
+	expectedPoints: number;
+	luckPoints: number;
+}
+
+export interface Robbery {
+	gameweek: number;
+	opponentId: number;
+	opponentName: string;
+	yourScore: number;
+	theirScore: number;
+	margin: number;
+	theirTotalLuck: number;
+	realScoreline: { you: number; them: number };
+	culprit: RobberyCulprit;
+	robberyRating: number; // 1-5 stars based on egregiousness
+}
+
+export interface ManagerRobberies {
+	managerId: number;
+	managerName: string;
+	robberies: Robbery[];
+	totalRobberies: number;
+	totalPointsStolen: number;
+}
+
+export interface LuckComponentSummary {
+	actual: number;
+	expected: number;
+	luck: number;      // In raw units
+	luckPoints: number; // In FPL points
+}
+
+export interface ManagerLuckBreakdown {
+	managerId: number;
+	managerName: string;
+	totalLuck: number;
+	// Component breakdown (all in points)
+	components: {
+		appearance: number;
+		goals: number;
+		assists: number;
+		cleanSheets: number;
+		goalsConceded: number;
+		bonus: number;
+		saves: number;
+		rareEvents: number; // cards + OGs + penalty saves/misses combined
+	};
+	// Per-gameweek breakdown
+	gameweeks: Array<{
+		gameweek: number;
+		luck: number;
+	}>;
+}
+
+export interface WeeklyBanter {
+	gameweek: number;
+	message: string;
+	generatedAt: string;
 }
