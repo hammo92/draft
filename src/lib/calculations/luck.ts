@@ -63,8 +63,11 @@ export function calculatePlayerGameweekLuck(
 	const goalsConceded = createComponent(actualGC, expectedGC, -0.5);
 
 	// Bonus: expected = bonusPerGame x mins/90 (no FDR adjustment - bonus is relative to game)
-	const expectedBonus = baseline.bonusPerGame * minutesFraction;
-	const bonus = createComponent(gwStats.bonus, expectedBonus, 1);
+	// Cap expected at 1.0 per 90 since bonus is high-variance and zero-sum per match
+	// Weight reduced to 0.5 since bonus is more about matchups than pure luck
+	const cappedBonusPerGame = Math.min(baseline.bonusPerGame, 1.0);
+	const expectedBonus = cappedBonusPerGame * minutesFraction;
+	const bonus = createComponent(gwStats.bonus, expectedBonus, 0.5);
 
 	// Saves: expected = (savesPerGame x mins/90) x defensive_FDR_mult (GK only)
 	// More saves expected against stronger opponents (higher defFdrMult)
@@ -134,8 +137,8 @@ export function calculatePlayerGameweekLuck(
 	const expectedAppearance = actualAppearance; // No luck component - availability is not performance luck
 	const appearance = createComponent(actualAppearance, expectedAppearance, 1);
 
-	// Calculate totals (appearance excluded from luck since it's not performance-based)
-	const allComponents = [
+	// Luck components (excluding appearance - playing time is not luck)
+	const luckComponents = [
 		goals,
 		assists,
 		cleanSheet,
@@ -148,12 +151,15 @@ export function calculatePlayerGameweekLuck(
 		penaltiesMissed,
 		penaltiesSaved
 	];
-	const totalExpectedPoints = allComponents.reduce(
-		(sum, c) => sum + c.expected * c.pointsPerUnit,
-		0
-	);
+
+	// Total expected includes appearance (for accurate expected score comparison)
+	// but luck calculation excludes it (playing time availability is not performance luck)
+	const totalExpectedPoints =
+		luckComponents.reduce((sum, c) => sum + c.expected * c.pointsPerUnit, 0) +
+		appearance.expected * appearance.pointsPerUnit; // Add appearance points
+
 	const totalActualPoints = gwStats.total_points;
-	const totalLuck = allComponents.reduce((sum, c) => sum + c.points, 0);
+	const totalLuck = luckComponents.reduce((sum, c) => sum + c.points, 0);
 
 	return {
 		playerId,

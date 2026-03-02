@@ -26,7 +26,7 @@ const createBaseline = (
 	goalsPerGame: position === 4 ? 1.5 : position === 3 ? 1.0 : 0.1,
 	assistsPerGame: 0.3,
 	cleanSheetsPerGame: position <= 2 ? 0.4 : 0.1,
-	bonusPerGame: 2.0,
+	bonusPerGame: 0.5, // Realistic average (~0.2-0.5 for most players)
 	savesPerGame: position === 1 ? 3.0 : 0,
 	yellowsPerGame: 0.1,
 	redsPerGame: 0.005,
@@ -187,7 +187,7 @@ describe('calculatePlayerGameweekLuck', () => {
 
 	describe('bonus component', () => {
 		it('should NOT apply FDR adjustment to bonus', () => {
-			const baseline = createBaseline(3, { bonusPerGame: 2.0 });
+			const baseline = createBaseline(3, { bonusPerGame: 0.8 });
 			const stats: GWStats = { ...normalGameStats, bonus: 3 };
 
 			const easyResult = calculatePlayerGameweekLuck(1, 'Test', 1, stats, baseline, 1.5, 1);
@@ -195,7 +195,28 @@ describe('calculatePlayerGameweekLuck', () => {
 
 			// Both should have same expected bonus (no FDR adjustment)
 			expect(easyResult.bonus.expected).toBe(hardResult.bonus.expected);
-			expect(easyResult.bonus.expected).toBeCloseTo(2.0, 5);
+			expect(easyResult.bonus.expected).toBeCloseTo(0.8, 5);
+		});
+
+		it('should cap expected bonus at 1.0 per 90', () => {
+			const baseline = createBaseline(3, { bonusPerGame: 2.5 }); // High bonus rate
+			const stats: GWStats = { ...normalGameStats, bonus: 3, minutes: 90 };
+
+			const result = calculatePlayerGameweekLuck(1, 'Test', 1, stats, baseline, 1.5, 3);
+
+			// Expected should be capped at 1.0, not 2.5
+			expect(result.bonus.expected).toBeCloseTo(1.0, 5);
+		});
+
+		it('should use reduced weight (0.5) for bonus luck', () => {
+			const baseline = createBaseline(3, { bonusPerGame: 0.5 });
+			const stats: GWStats = { ...normalGameStats, bonus: 3, minutes: 90 };
+
+			const result = calculatePlayerGameweekLuck(1, 'Test', 1, stats, baseline, 1.5, 3);
+
+			// Luck = 3 - 0.5 = 2.5, points = 2.5 * 0.5 = 1.25
+			expect(result.bonus.pointsPerUnit).toBe(0.5);
+			expect(result.bonus.points).toBeCloseTo(2.5 * 0.5, 5);
 		});
 	});
 

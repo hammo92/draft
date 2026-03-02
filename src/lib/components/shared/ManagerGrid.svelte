@@ -6,7 +6,7 @@
 
 <Card.Root class="bg-card border border-border rounded shadow-none">
 	<Card.Header>
-		<Card.Title class="font-serif text-2xl font-semibold text-foreground">Managers</Card.Title>
+		<Card.Title class="font-sans text-2xl font-semibold text-foreground">Managers</Card.Title>
 		<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">Individual performance overview</Card.Description>
 	</Card.Header>
 	<Card.Content>
@@ -14,7 +14,7 @@
 			{#each entries as entry}
 				<div class="p-5 bg-muted rounded border-l-4 border-accent">
 					<div class="mb-4">
-						<h3 class="font-serif text-lg font-semibold text-foreground">{entry.player_first_name} {entry.player_last_name}</h3>
+						<h3 class="font-sans text-lg font-semibold text-foreground">{entry.player_first_name} {entry.player_last_name}</h3>
 						<p class="font-mono text-xs uppercase tracking-wider text-muted-foreground">{entry.entry_name}</p>
 					</div>
 					<div class="grid grid-cols-2 gap-3">

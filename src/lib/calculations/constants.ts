@@ -32,11 +32,12 @@ export const POSITION_FALLBACK_RATES = {
 
 // Position-based fallback rates for main stats (when player has < MIN_MINUTES_THRESHOLD)
 // Uses league-average per-90 rates by position
+// Note: ~60 total bonus awarded per GW across ~300 players = ~0.2 avg per player
 export const POSITION_MAIN_FALLBACKS = {
 	goalsPerGame: { 1: 0.01, 2: 0.08, 3: 0.15, 4: 0.35 } as Record<number, number>,
 	assistsPerGame: { 1: 0.02, 2: 0.1, 3: 0.15, 4: 0.15 } as Record<number, number>,
 	cleanSheetsPerGame: { 1: 0.35, 2: 0.35, 3: 0.15, 4: 0 } as Record<number, number>,
-	bonusPerGame: { 1: 1.5, 2: 1.8, 3: 2.0, 4: 2.2 } as Record<number, number>,
+	bonusPerGame: { 1: 0.25, 2: 0.20, 3: 0.25, 4: 0.30 } as Record<number, number>,
 	savesPerGame: { 1: 3.0, 2: 0, 3: 0, 4: 0 } as Record<number, number>
 };
 

@@ -20,7 +20,7 @@
 	{#if stats.biggestWin || stats.closestGame}
 		<Card.Root class="bg-card border border-border rounded shadow-none">
 			<Card.Header>
-				<Card.Title class="font-serif text-2xl font-semibold text-foreground">Season Highlights</Card.Title>
+				<Card.Title class="font-sans text-2xl font-semibold text-foreground">Season Highlights</Card.Title>
 				<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
 					Notable fixtures
 				</Card.Description>
@@ -30,7 +30,7 @@
 					{#if stats.biggestWin}
 						<div class="p-4 bg-muted rounded border-l-4 border-accent">
 							<div class="font-mono text-xs uppercase tracking-wider text-muted-foreground mb-1">Biggest Win</div>
-							<div class="font-serif text-lg font-semibold text-foreground">{stats.biggestWin.winner}</div>
+							<div class="font-sans text-lg font-semibold text-foreground">{stats.biggestWin.winner}</div>
 							<div class="font-mono text-2xl font-bold text-accent">{stats.biggestWin.score}</div>
 							<div class="font-mono text-sm text-muted-foreground">
 								vs {stats.biggestWin.loser} (GW{stats.biggestWin.gameweek})
@@ -40,7 +40,7 @@
 					{#if stats.closestGame}
 						<div class="p-4 bg-muted rounded border-l-4 border-accent">
 							<div class="font-mono text-xs uppercase tracking-wider text-muted-foreground mb-1">Closest Game</div>
-							<div class="font-serif text-lg font-semibold text-foreground">{stats.closestGame.manager1}</div>
+							<div class="font-sans text-lg font-semibold text-foreground">{stats.closestGame.manager1}</div>
 							<div class="font-mono text-2xl font-bold text-accent">{stats.closestGame.score}</div>
 							<div class="font-mono text-sm text-muted-foreground">
 								vs {stats.closestGame.manager2} (GW{stats.closestGame.gameweek})
@@ -55,7 +55,7 @@
 	<!-- Fixtures by Gameweek -->
 	<Card.Root class="bg-card border border-border rounded shadow-none">
 		<Card.Header>
-			<Card.Title class="font-serif text-2xl font-semibold text-foreground">Match History</Card.Title>
+			<Card.Title class="font-sans text-2xl font-semibold text-foreground">Match History</Card.Title>
 			<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
 				All fixtures by gameweek
 			</Card.Description>

@@ -9,11 +9,11 @@
 </script>
 
 <div class="space-y-6">
-	<h3 class="text-fpl-purple text-xl font-semibold">Recent Gameweek Breakdown</h3>
-	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+	<h3 class="text-accent text-sm font-sans font-semibold uppercase tracking-wider">Recent Gameweek Breakdown</h3>
+	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 		{#each sortedByBenchPoints as entry}
-			<div class="p-6 bg-muted rounded-lg">
-				<h4 class="text-fpl-purple font-semibold mb-4">{entry.entry_name}</h4>
+			<div class="p-4 bg-muted/50 rounded-sm border border-border">
+				<h4 class="font-sans font-semibold text-foreground mb-3">{entry.entry_name}</h4>
 				<div class="flex flex-col gap-3">
 					{#each entry.stats.benchPointsByGameweek.sort((a: any, b: any) => b.gameweek - a.gameweek) as gwData}
 						<div class="flex flex-col gap-1">

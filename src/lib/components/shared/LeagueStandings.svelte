@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as Card from "$lib/components/ui/card";
-	import { ChevronUp, ChevronDown } from "@lucide/svelte";
+	import { ChevronUp, ChevronDown, Trophy, TrendingUp, TrendingDown, Minus } from "@lucide/svelte";
 
 	let { standings = [] }: { standings: any[] } = $props();
 
@@ -15,7 +15,6 @@
 			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
 		} else {
 			sortKey = key;
-			// Default sort direction based on column type
 			sortDir = key === 'player_name' ? 'asc' : 'desc';
 		}
 	}
@@ -25,7 +24,6 @@
 			let aVal = a[sortKey];
 			let bVal = b[sortKey];
 
-			// Handle string comparison
 			if (typeof aVal === 'string') {
 				aVal = aVal.toLowerCase();
 				bVal = bVal?.toLowerCase() || '';
@@ -40,24 +38,40 @@
 	});
 
 	function headerClass(key: SortKey, align: 'left' | 'right' | 'center' = 'left'): string {
-		const base = `font-mono text-xs uppercase tracking-wider py-3 px-2 cursor-pointer hover:text-accent transition-colors select-none`;
+		const base = `text-[10px] uppercase tracking-widest py-2 px-2 cursor-pointer hover:text-accent transition-colors select-none whitespace-nowrap`;
 		const active = sortKey === key ? 'text-accent' : 'text-muted-foreground';
 		const alignment = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
 		return `${base} ${active} ${alignment}`;
 	}
+
+	function getRankStyle(rank: number, total: number): string {
+		if (rank === 1) return 'text-accent glow-accent';
+		if (rank === 2) return 'text-success';
+		if (rank === 3) return 'text-success/70';
+		if (rank >= total - 1) return 'text-destructive';
+		return 'text-foreground';
+	}
+
+	function getWinRate(wins: number, total: number): number {
+		if (total === 0) return 0;
+		return Math.round((wins / total) * 100);
+	}
 </script>
 
-<Card.Root class="bg-card border border-border rounded shadow-none">
-	<Card.Header>
-		<Card.Title class="font-serif text-2xl font-semibold text-foreground">League Standings</Card.Title>
-		<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">Click headers to sort</Card.Description>
+<Card.Root class="overflow-hidden">
+	<Card.Header class="flex-row items-center justify-between">
+		<div class="flex items-center gap-2">
+			<Trophy class="w-4 h-4 text-accent" />
+			<Card.Title>League Standings</Card.Title>
+		</div>
+		<Card.Description>Click column headers to sort</Card.Description>
 	</Card.Header>
-	<Card.Content>
+	<Card.Content class="p-0">
 		<div class="overflow-x-auto">
-			<table class="w-full">
+			<table class="w-full text-sm">
 				<thead>
-					<tr class="border-b border-border">
-						<th class="{headerClass('rank')} w-12" onclick={() => toggleSort('rank')}>
+					<tr class="border-b border-border bg-muted/50">
+						<th class="{headerClass('rank')} w-10" onclick={() => toggleSort('rank')}>
 							<span class="inline-flex items-center gap-1">
 								#
 								{#if sortKey === 'rank'}
@@ -73,7 +87,7 @@
 								{/if}
 							</span>
 						</th>
-						<th class="{headerClass('wins', 'center')} hidden sm:table-cell w-12" onclick={() => toggleSort('wins')}>
+						<th class="{headerClass('wins', 'center')} hidden sm:table-cell w-10" onclick={() => toggleSort('wins')}>
 							<span class="inline-flex items-center justify-center gap-1">
 								W
 								{#if sortKey === 'wins'}
@@ -81,7 +95,7 @@
 								{/if}
 							</span>
 						</th>
-						<th class="{headerClass('draws', 'center')} hidden sm:table-cell w-12" onclick={() => toggleSort('draws')}>
+						<th class="{headerClass('draws', 'center')} hidden sm:table-cell w-10" onclick={() => toggleSort('draws')}>
 							<span class="inline-flex items-center justify-center gap-1">
 								D
 								{#if sortKey === 'draws'}
@@ -89,7 +103,7 @@
 								{/if}
 							</span>
 						</th>
-						<th class="{headerClass('losses', 'center')} hidden sm:table-cell w-12" onclick={() => toggleSort('losses')}>
+						<th class="{headerClass('losses', 'center')} hidden sm:table-cell w-10" onclick={() => toggleSort('losses')}>
 							<span class="inline-flex items-center justify-center gap-1">
 								L
 								{#if sortKey === 'losses'}
@@ -97,7 +111,7 @@
 								{/if}
 							</span>
 						</th>
-						<th class="{headerClass('points_for', 'right')}" onclick={() => toggleSort('points_for')}>
+						<th class="{headerClass('points_for', 'right')} hidden md:table-cell" onclick={() => toggleSort('points_for')}>
 							<span class="inline-flex items-center justify-end gap-1">
 								{#if sortKey === 'points_for'}
 									{#if sortDir === 'asc'}<ChevronUp class="w-3 h-3" />{:else}<ChevronDown class="w-3 h-3" />{/if}
@@ -116,31 +130,41 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each sortedStandings as standing (standing.entry_id)}
-						<tr class="border-b border-border last:border-b-0 hover:bg-muted transition-colors">
-							<td class="py-3 px-2">
-								<span class="font-mono font-bold text-foreground {standing.rank === 1 ? 'text-accent' : ''}">{standing.rank || '-'}</span>
+					{#each sortedStandings as standing, i (standing.entry_id)}
+						{@const totalMatches = (standing.wins || 0) + (standing.draws || 0) + (standing.losses || 0)}
+						{@const winRate = getWinRate(standing.wins || 0, totalMatches)}
+						{@const isAverage = standing.player_name?.toUpperCase() === 'AVERAGE' || standing.entry_name?.toLowerCase() === 'league average'}
+						<tr class="border-b last:border-b-0 transition-colors group {isAverage ? 'border-dashed border-accent/30 bg-accent/5' : 'border-border hover:bg-muted/50'}">
+							<td class="py-2.5 px-2">
+								<span class="font-bold tabular {getRankStyle(standing.rank, standings.length)}">
+									{standing.rank || '-'}
+								</span>
 							</td>
-							<td class="py-3 px-2">
-								<div class="flex flex-col">
-									<span class="font-sans text-foreground">{standing.player_name}</span>
-									<span class="font-sans text-xs text-muted-foreground md:hidden">{standing.entry_name}</span>
+							<td class="py-2.5 px-2">
+								<div class="flex flex-col gap-0.5">
+									<span class="font-sans font-medium transition-colors {isAverage ? 'text-accent italic' : 'text-foreground group-hover:text-accent'}">{standing.player_name}</span>
+									<span class="font-sans text-[10px] text-muted-foreground truncate max-w-[150px]">{standing.entry_name}</span>
 								</div>
 							</td>
-							<td class="py-3 px-2 text-center hidden sm:table-cell">
-								<span class="font-mono text-green-500">{standing.wins || 0}</span>
+							<td class="py-2.5 px-2 text-center hidden sm:table-cell">
+								<span class="tabular text-success font-medium">{standing.wins || 0}</span>
 							</td>
-							<td class="py-3 px-2 text-center hidden sm:table-cell">
-								<span class="font-mono text-muted-foreground">{standing.draws || 0}</span>
+							<td class="py-2.5 px-2 text-center hidden sm:table-cell">
+								<span class="tabular text-muted-foreground">{standing.draws || 0}</span>
 							</td>
-							<td class="py-3 px-2 text-center hidden sm:table-cell">
-								<span class="font-mono text-red-500">{standing.losses || 0}</span>
+							<td class="py-2.5 px-2 text-center hidden sm:table-cell">
+								<span class="tabular text-destructive font-medium">{standing.losses || 0}</span>
 							</td>
-							<td class="py-3 px-2 text-right">
-								<span class="font-mono text-muted-foreground">{standing.points_for || 0}</span>
+							<td class="py-2.5 px-2 text-right hidden md:table-cell">
+								<span class="tabular text-muted-foreground">{standing.points_for?.toLocaleString() || 0}</span>
 							</td>
-							<td class="py-3 px-2 text-right">
-								<span class="font-mono font-bold text-accent">{standing.total || 0}</span>
+							<td class="py-2.5 px-2 text-right">
+								<div class="flex flex-col items-end gap-0.5">
+									<span class="tabular font-bold {standing.rank === 1 ? 'text-accent glow-accent' : 'text-foreground'}">{standing.total || 0}</span>
+									{#if winRate > 0}
+										<span class="text-[9px] text-muted-foreground tabular">{winRate}% WR</span>
+									{/if}
+								</div>
 							</td>
 						</tr>
 					{/each}

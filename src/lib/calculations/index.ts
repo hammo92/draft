@@ -43,3 +43,7 @@ export { calculateStreaks } from './streaks';
 
 // Would Have Beat
 export { calculateWouldHaveBeat } from './would-have-beat';
+
+// Fixture Luck & Holistic Luck
+export { calculateFixtureLuck, calculateHolisticLuck, calculateLossAnalysis } from './fixture-luck';
+export type { ManagerFixtureLuck, FixtureLuckGW, HolisticLuck } from './fixture-luck';

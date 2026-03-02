@@ -12,12 +12,12 @@
 	} = $props();
 </script>
 
-<div class="flex items-center gap-4 p-4 bg-muted rounded-lg">
-	<label for="gw-selector" class="font-semibold text-fpl-purple">{label}:</label>
+<div class="flex items-center gap-3 p-3 bg-muted/50 border border-border rounded-sm">
+	<label for="gw-selector" class="label-bright whitespace-nowrap">{label}:</label>
 	<select
 		id="gw-selector"
 		bind:value={selectedGameweek}
-		class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+		class="h-8 rounded-sm border border-border bg-input px-2 py-1 text-sm font-mono tabular focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
 	>
 		{#each Array.from({ length: currentGameweek - startGameweek + 1 }, (_, i) => startGameweek + i) as gw}
 			<option value={gw}>Gameweek {gw}</option>

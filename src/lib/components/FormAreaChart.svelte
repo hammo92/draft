@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { interpolateRgb } from 'd3-interpolate';
-
 	let {
 		form = [],
 		managerName = '',
@@ -23,7 +21,6 @@
 		}))
 	);
 
-	// Get min/max for Y axis (use fixed values if provided for standardization)
 	const yExtent = $derived.by(() => {
 		if (fixedYMin !== undefined && fixedYMax !== undefined) {
 			return { min: fixedYMin, max: fixedYMax };
@@ -39,31 +36,37 @@
 		};
 	});
 
-	// Average line value
 	const average = $derived(
 		chartData.length > 0
 			? chartData.reduce((sum, d) => sum + d.points, 0) / chartData.length
 			: 0
 	);
 
-	// Color based on average performance
-	function getColor(avg: number): string {
-		if (avg >= 55) return '#22c55e'; // green
-		if (avg >= 45) return '#3b82f6'; // blue
-		if (avg >= 35) return '#eab308'; // yellow
-		return '#ef4444'; // red
+	// Terminal-style colors - cyan gradient based on performance
+	function getLineColor(avg: number): string {
+		if (avg >= 55) return '#00ff88'; // success green
+		if (avg >= 45) return '#00d4ff'; // accent cyan
+		if (avg >= 35) return '#ffaa00'; // warning amber
+		return '#ff4455'; // destructive red
 	}
 
 	function getAreaColor(avg: number): string {
-		if (avg >= 55) return 'rgba(34, 197, 94, 0.3)';
-		if (avg >= 45) return 'rgba(59, 130, 246, 0.3)';
-		if (avg >= 35) return 'rgba(234, 179, 8, 0.3)';
-		return 'rgba(239, 68, 68, 0.3)';
+		if (avg >= 55) return 'rgba(0, 255, 136, 0.15)';
+		if (avg >= 45) return 'rgba(0, 212, 255, 0.15)';
+		if (avg >= 35) return 'rgba(255, 170, 0, 0.15)';
+		return 'rgba(255, 68, 85, 0.15)';
 	}
 
-	// SVG dimensions
+	function getGlowFilter(avg: number): string {
+		if (avg >= 55) return 'drop-shadow(0 0 6px rgba(0, 255, 136, 0.7)) drop-shadow(0 0 12px rgba(0, 255, 136, 0.3))';
+		if (avg >= 45) return 'drop-shadow(0 0 6px rgba(0, 212, 255, 0.7)) drop-shadow(0 0 12px rgba(0, 212, 255, 0.3))';
+		if (avg >= 35) return 'drop-shadow(0 0 6px rgba(255, 170, 0, 0.7)) drop-shadow(0 0 12px rgba(255, 170, 0, 0.3))';
+		return 'drop-shadow(0 0 6px rgba(255, 68, 85, 0.7)) drop-shadow(0 0 12px rgba(255, 68, 85, 0.3))';
+	}
+
+	// SVG dimensions - more compact for terminal style
 	const width = 200;
-	const padding = { top: 15, right: 15, bottom: 25, left: 30 };
+	const padding = { top: 8, right: 12, bottom: 20, left: 28 };
 	const chartWidth = width - padding.left - padding.right;
 	const chartHeight = height - padding.top - padding.bottom;
 
@@ -78,7 +81,6 @@
 		return padding.top + chartHeight - ((value - min) / (max - min)) * chartHeight;
 	}
 
-	// Generate area path
 	const areaPath = $derived.by(() => {
 		if (chartData.length === 0) return '';
 		const points = chartData.map((d, i) => `${xScale(i)},${yScale(d.points)}`);
@@ -86,46 +88,58 @@
 		return `M${points.join(' L')} L${baseline.join(' L')} Z`;
 	});
 
-	// Generate line path
 	const linePath = $derived.by(() => {
 		if (chartData.length === 0) return '';
 		return 'M' + chartData.map((d, i) => `${xScale(i)},${yScale(d.points)}`).join(' L');
 	});
 
-	// Hover state
 	let hoveredIndex = $state<number | null>(null);
 </script>
 
 <div class="w-full">
 	<svg {width} {height} class="w-full h-auto" viewBox="0 0 {width} {height}">
+		<!-- Grid lines -->
+		{#each [0.25, 0.5, 0.75] as ratio}
+			<line
+				x1={padding.left}
+				y1={padding.top + chartHeight * ratio}
+				x2={width - padding.right}
+				y2={padding.top + chartHeight * ratio}
+				stroke="var(--color-border)"
+				stroke-opacity="0.3"
+				stroke-width="1"
+			/>
+		{/each}
+
 		<!-- Average line -->
 		<line
 			x1={padding.left}
 			y1={yScale(average)}
 			x2={width - padding.right}
 			y2={yScale(average)}
-			stroke={getColor(average)}
-			stroke-opacity="0.5"
-			stroke-dasharray="4"
-			stroke-width="1"
+			stroke={getLineColor(average)}
+			stroke-opacity="0.6"
+			stroke-dasharray="4 4"
+			stroke-width="1.5"
 		/>
 
-		<!-- Area -->
+		<!-- Area fill -->
 		<path
 			d={areaPath}
 			fill={getAreaColor(average)}
 			class="transition-colors duration-300"
 		/>
 
-		<!-- Line -->
+		<!-- Line with glow -->
 		<path
 			d={linePath}
 			fill="none"
-			stroke={getColor(average)}
-			stroke-width="2.5"
+			stroke={getLineColor(average)}
+			stroke-width="2"
 			stroke-linecap="round"
 			stroke-linejoin="round"
 			class="transition-colors duration-300"
+			style="filter: {getGlowFilter(average)}"
 		/>
 
 		<!-- Data points -->
@@ -133,9 +147,11 @@
 			<circle
 				cx={xScale(i)}
 				cy={yScale(point.points)}
-				r={hoveredIndex === i ? 6 : 4}
-				fill={getColor(average)}
-				class="transition-all duration-150 cursor-pointer"
+				r={hoveredIndex === i ? 5 : 3}
+				fill={hoveredIndex === i ? getLineColor(average) : 'var(--color-card)'}
+				stroke={getLineColor(average)}
+				stroke-width="1.5"
+				class="transition-all duration-100 cursor-pointer"
 				role="button"
 				tabindex="0"
 				aria-label="GW{point.gw}: {point.points} points"
@@ -147,40 +163,50 @@
 		{/each}
 
 		<!-- Y axis labels -->
-		<text x={padding.left - 5} y={padding.top + 4} class="text-[10px] fill-muted-foreground" text-anchor="end">
+		<text x={padding.left - 4} y={padding.top + 4} class="text-[10px] fill-muted-foreground font-mono tabular" text-anchor="end">
 			{Math.round(yExtent.max)}
 		</text>
-		<text x={padding.left - 5} y={height - padding.bottom} class="text-[10px] fill-muted-foreground" text-anchor="end">
+		<text x={padding.left - 4} y={height - padding.bottom - 2} class="text-[10px] fill-muted-foreground font-mono tabular" text-anchor="end">
 			{Math.round(yExtent.min)}
 		</text>
 
-		<!-- X axis labels (gameweeks) -->
-		{#each chartData as point, i (point.gw)}
+		<!-- X axis labels (gameweeks) - only show first and last -->
+		{#if chartData.length > 0}
 			<text
-				x={xScale(i)}
-				y={height - padding.bottom + 15}
-				class="text-[10px] fill-muted-foreground"
+				x={xScale(0)}
+				y={height - 4}
+				class="text-[9px] fill-muted-foreground font-mono"
 				text-anchor="middle"
 			>
-				{point.gw}
+				GW{chartData[0].gw}
 			</text>
-		{/each}
+			{#if chartData.length > 1}
+				<text
+					x={xScale(chartData.length - 1)}
+					y={height - 4}
+					class="text-[9px] fill-muted-foreground font-mono"
+					text-anchor="middle"
+				>
+				GW{chartData[chartData.length - 1].gw}
+				</text>
+			{/if}
+		{/if}
 
 		<!-- Tooltip -->
 		{#if hoveredIndex !== null}
 			{@const point = chartData[hoveredIndex]}
-			<g transform="translate({xScale(hoveredIndex)}, {yScale(point.points) - 30})">
+			<g transform="translate({xScale(hoveredIndex)}, {Math.max(yScale(point.points) - 28, 10)})">
 				<rect
-					x="-25"
+					x="-20"
 					y="0"
-					width="50"
-					height="22"
-					rx="4"
-					fill="var(--color-popover)"
-					stroke="var(--color-border)"
-					class="drop-shadow-sm"
+					width="40"
+					height="20"
+					rx="2"
+					fill="var(--color-elevated)"
+					stroke={getLineColor(average)}
+					stroke-width="1"
 				/>
-				<text x="0" y="15" class="text-xs font-mono font-bold fill-current" text-anchor="middle">
+				<text x="0" y="14" class="text-[10px] font-bold" fill={getLineColor(average)} text-anchor="middle">
 					{point.points}
 				</text>
 			</g>

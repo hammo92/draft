@@ -43,7 +43,7 @@
 
 <Card.Root class="bg-card border border-border rounded shadow-none">
 	<Card.Header>
-		<Card.Title class="font-serif text-2xl font-semibold text-foreground">Weekly Performance</Card.Title>
+		<Card.Title class="font-sans text-2xl font-semibold text-foreground">Weekly Performance</Card.Title>
 		<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">Detailed gameweek-by-gameweek analysis</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-6">
@@ -55,7 +55,7 @@
 
 		<!-- Gameweek Leaderboard -->
 		<div class="space-y-4">
-			<h3 class="font-serif text-xl font-semibold text-foreground">Gameweek {selectedGameweek} Results</h3>
+			<h3 class="font-sans text-xl font-semibold text-foreground">Gameweek {selectedGameweek} Results</h3>
 			<div class="flex flex-col gap-3">
 				{#each gameweekData as manager, index}
 					{@const podiumClass = index === 0
@@ -80,7 +80,7 @@
 							{/if}
 						</div>
 						<div>
-							<h4 class="font-serif font-semibold text-foreground">{manager.entry_name}</h4>
+							<h4 class="font-sans font-semibold text-foreground">{manager.entry_name}</h4>
 							<p class="font-mono text-xs text-muted-foreground">{manager.player_name}</p>
 						</div>
 						<div class="text-3xl md:text-3xl font-bold text-foreground text-center">{manager.points}</div>

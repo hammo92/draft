@@ -46,7 +46,10 @@ import {
 	calculateRivalryStats,
 	calculateNemesisBunny,
 	calculateStreaks,
-	calculateWouldHaveBeat
+	calculateWouldHaveBeat,
+	calculateFixtureLuck,
+	calculateHolisticLuck,
+	calculateLossAnalysis
 } from '$lib/calculations';
 
 const LEAGUE_ID = 21959;
@@ -1189,8 +1192,11 @@ export const load: PageServerLoad = async ({ fetch }) => {
 				try {
 					const history = historiesMap.get(entry.entry_id!);
 
-					// Fetch team picks for ALL completed gameweeks (for bench points calculation)
-					const gameweeksToFetch = completedGameweeks.filter(gw => gw >= startGameweek);
+					// Fetch team picks for ALL completed gameweeks + current gameweek (for bench points and squad viewer)
+					const gameweeksToFetch = [...new Set([
+						...completedGameweeks.filter(gw => gw >= startGameweek),
+						currentGameweek // Include current GW even if not finished, so squad viewer works
+					])].sort((a, b) => a - b);
 					const picksPromises = gameweeksToFetch.map(gw =>
 						fetch(`https://draft.premierleague.com/api/entry/${entry.entry_id}/event/${gw}`)
 							.then((r) => r.json())
@@ -1548,7 +1554,18 @@ export const load: PageServerLoad = async ({ fetch }) => {
 			completedGameweeks
 		);
 
-		// Calculate fun stats
+		// Calculate fixture luck (schedule favorability + opponent variance)
+		const fixtureLuck = calculateFixtureLuck(
+			detailedEntries,
+			leagueDetails.matches,
+			completedGameweeks,
+			liveDataMap,
+			playerBaselines,
+			players,
+			fixturesByGw
+		);
+
+		// Calculate fun stats (includes robberies)
 		const funStats = calculateFunStats(
 			detailedEntries,
 			liveDataMap,
@@ -1558,6 +1575,21 @@ export const load: PageServerLoad = async ({ fetch }) => {
 			playerBaselines,
 			fixturesByGw
 		);
+
+		// Calculate loss analysis (categorized breakdown of why losses happened)
+		const lossAnalysis = calculateLossAnalysis(
+			detailedEntries,
+			leagueDetails.matches,
+			completedGameweeks,
+			liveDataMap,
+			playerBaselines,
+			players,
+			fixturesByGw,
+			funStats.robberies
+		);
+
+		// Calculate holistic luck (performance + schedule + outcome luck from loss analysis)
+		const holisticLuck = calculateHolisticLuck(h2hLuck, fixtureLuck, lossAnalysis);
 
 		// Generate weekly banter using Gemini
 		const weeklyBanter = await generateWeeklyBanter(
@@ -1591,7 +1623,10 @@ export const load: PageServerLoad = async ({ fetch }) => {
 				stats: h2hStats,
 				nemesisBunny,
 				streaks,
-				wouldHaveBeat
+				wouldHaveBeat,
+				fixtureLuck,
+				holisticLuck,
+				lossAnalysis
 			},
 			funStats,
 			weeklyAwards,

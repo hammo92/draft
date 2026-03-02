@@ -44,7 +44,7 @@
 {#if breakdown.length > 0}
 	<Card.Root class="bg-card border border-border rounded shadow-none">
 		<Card.Header class="pb-3">
-			<Card.Title class="font-serif text-lg font-semibold text-foreground flex items-center gap-2">
+			<Card.Title class="font-sans text-lg font-semibold text-foreground flex items-center gap-2">
 				<Target class="w-5 h-5 text-accent" />
 				Holistic Luck Breakdown
 			</Card.Title>

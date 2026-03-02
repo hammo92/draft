@@ -11,7 +11,7 @@
 </script>
 
 <div class="space-y-4">
-	<h3 class="font-serif text-xl font-semibold text-foreground">Full Season Overview</h3>
+	<h3 class="font-sans text-xl font-semibold text-foreground">Full Season Overview</h3>
 	<div class="overflow-x-auto bg-muted rounded-lg p-4">
 		<div class="grid gap-2" style="grid-template-columns: 150px repeat({currentGameweek - startGameweek + 1}, 45px) 70px;">
 			<!-- Header Row -->
@@ -26,7 +26,7 @@
 			<!-- Data Rows -->
 			{#each performanceMatrix as entry}
 				<div class="contents border-b border-border/50 py-2">
-					<div class="font-serif font-semibold text-muted-foreground text-sm py-2">{entry.entry_name}</div>
+					<div class="font-sans font-semibold text-muted-foreground text-sm py-2">{entry.entry_name}</div>
 					{#each entry.gameweekPoints as gwData}
 						{@const points = gwData.points}
 						<div

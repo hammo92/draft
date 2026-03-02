@@ -16,8 +16,8 @@
 
 <Card.Root class="bg-card border border-border rounded shadow-none">
 	<Card.Header>
-		<Card.Title class="font-serif text-2xl font-semibold text-foreground">Bench Points Tracker</Card.Title>
-		<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">Points left on the bench - measure your lineup optimization</Card.Description>
+		<Card.Title>Bench Points Tracker</Card.Title>
+		<Card.Description>Points left on the bench - measure your lineup optimization</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-8">
 		<div class="flex flex-col gap-4">
@@ -28,8 +28,8 @@
 						{index + 1}
 					</Badge>
 					<div>
-						<h3 class="font-serif font-semibold text-lg mb-1 text-foreground">{entry.entry_name}</h3>
-						<p class="font-mono text-xs text-muted-foreground">{entry.player_first_name} {entry.player_last_name}</p>
+						<h3 class="font-sans font-semibold text-lg mb-1 text-foreground">{entry.entry_name}</h3>
+						<p class="font-sans text-xs text-muted-foreground">{entry.player_first_name} {entry.player_last_name}</p>
 					</div>
 					<div class="flex gap-8 md:flex-row flex-col md:col-auto col-span-3">
 						<div class="flex flex-col items-center">

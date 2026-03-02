@@ -39,14 +39,14 @@
 
 <Card.Root>
 	<Card.Header>
-		<Card.Title class="text-fpl-purple text-2xl">🎯 Manager Comparison</Card.Title>
+		<Card.Title class="text-accent text-2xl">🎯 Manager Comparison</Card.Title>
 		<Card.Description>Compare two managers head-to-head</Card.Description>
 	</Card.Header>
 	<Card.Content class="space-y-6">
 		<!-- Manager Selectors -->
 		<div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 md:gap-8 items-center p-4 bg-muted rounded-lg">
 			<div class="flex flex-col gap-2">
-				<label for="manager1" class="font-semibold text-fpl-purple text-sm">Manager 1:</label>
+				<label for="manager1" class="font-semibold text-accent text-sm">Manager 1:</label>
 				<select
 					id="manager1"
 					bind:value={manager1}
@@ -58,10 +58,10 @@
 				</select>
 			</div>
 
-			<div class="hidden md:block text-center text-2xl font-bold text-fpl-purple">VS</div>
+			<div class="hidden md:block text-center text-2xl font-bold text-accent">VS</div>
 
 			<div class="flex flex-col gap-2">
-				<label for="manager2" class="font-semibold text-fpl-purple text-sm">Manager 2:</label>
+				<label for="manager2" class="font-semibold text-accent text-sm">Manager 2:</label>
 				<select
 					id="manager2"
 					bind:value={manager2}
@@ -138,13 +138,13 @@
 				<!-- Form Comparison -->
 				<Card.Root>
 					<Card.Header>
-						<Card.Title class="text-fpl-purple">Weekly Form (Last 5 GWs)</Card.Title>
+						<Card.Title class="text-accent">Weekly Form (Last 5 GWs)</Card.Title>
 						<Card.Description>Gameweek points over recent fixtures</Card.Description>
 					</Card.Header>
 					<Card.Content>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 							<div class="space-y-3">
-								<h4 class="font-semibold text-fpl-purple">{comp.m1.entry_name}</h4>
+								<h4 class="font-semibold text-accent">{comp.m1.entry_name}</h4>
 								<div class="flex justify-around items-end h-32 gap-2">
 									{#each comp.m1.stats.form as points}
 										<div class="flex-1 bg-gradient-to-t from-purple-500 to-purple-700 rounded flex items-start justify-center pt-1 text-white text-xs font-bold min-h-8" style="height: {(points / 100) * 100}%">
@@ -155,7 +155,7 @@
 							</div>
 
 							<div class="space-y-3">
-								<h4 class="font-semibold text-fpl-purple">{comp.m2.entry_name}</h4>
+								<h4 class="font-semibold text-accent">{comp.m2.entry_name}</h4>
 								<div class="flex justify-around items-end h-32 gap-2">
 									{#each comp.m2.stats.form as points}
 										<div class="flex-1 bg-gradient-to-t from-purple-500 to-purple-700 rounded flex items-start justify-center pt-1 text-white text-xs font-bold min-h-8" style="height: {(points / 100) * 100}%">

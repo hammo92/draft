@@ -75,7 +75,7 @@
 	<Card.Header class="pb-3">
 		<div class="flex items-center justify-between">
 			<div>
-				<Card.Title class="font-serif text-lg font-semibold text-foreground flex items-center gap-2">
+				<Card.Title class="font-sans text-lg font-semibold text-foreground flex items-center gap-2">
 					<ArrowRightLeft class="w-5 h-5 text-orange-500" />
 					Transfer Regrets
 				</Card.Title>

@@ -11,7 +11,7 @@
 
 <div class="space-y-6">
 	<div>
-		<h3 class="font-serif text-xl font-semibold text-foreground">Squad Strength Comparison</h3>
+		<h3 class="font-sans text-xl font-semibold text-foreground">Squad Strength Comparison</h3>
 		<p class="font-mono text-xs uppercase tracking-wider text-muted-foreground">Total points accumulated by each squad</p>
 	</div>
 
@@ -22,7 +22,7 @@
 			>
 				<div class="text-2xl font-bold text-foreground text-center">#{index + 1}</div>
 				<div>
-					<h4 class="font-serif font-semibold text-foreground">{squad.entry_name}</h4>
+					<h4 class="font-sans font-semibold text-foreground">{squad.entry_name}</h4>
 					<div class="font-mono text-xs text-muted-foreground">{squad.totalPoints.toLocaleString()} total points</div>
 				</div>
 				<div class="flex flex-col gap-2">

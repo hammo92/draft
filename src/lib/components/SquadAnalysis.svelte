@@ -4,20 +4,34 @@
 	import SquadViewer from "$lib/components/squad/SquadViewer.svelte";
 	import FreeAgentsList from "$lib/components/squad/FreeAgentsList.svelte";
 	import SquadStrengthComparison from "$lib/components/squad/SquadStrengthComparison.svelte";
+	import { Users, UserSearch, BarChart3 } from '@lucide/svelte';
 
 	let { entries = [], players = {}, currentGameweek = 1 }: { entries: any[], players: any, currentGameweek: number } = $props();
 
-	let activeView = $state('squads');
 	let selectedManager = $state(entries[0]?.entry_id || null);
 	let positionFilter = $state('all');
 	let searchTerm = $state('');
 
+	// Find the most recent available gameweek (current GW may not have data if in progress)
+	let availableGameweek = $derived.by(() => {
+		// Check if any manager has data for the current gameweek
+		const hasCurrentGw = entries.some((e: any) =>
+			e.recentPicks?.some((p: any) => p.gameweek === currentGameweek && p.data?.picks)
+		);
+		if (hasCurrentGw) return currentGameweek;
+
+		// Otherwise find the most recent gameweek with data
+		const allGameweeks = entries
+			.flatMap((e: any) => e.recentPicks?.filter((p: any) => p.data?.picks).map((p: any) => p.gameweek) || []);
+		return allGameweeks.length > 0 ? Math.max(...allGameweeks) : currentGameweek;
+	});
+
 	// Get manager's squad
-	let selectedManagerSquad = $derived(() => {
+	let selectedManagerSquad = $derived.by(() => {
 		const manager = entries.find((e: any) => e.entry_id === selectedManager);
 		if (!manager) return [];
 
-		const recentPicks = manager.recentPicks.find((p: any) => p.gameweek === currentGameweek);
+		const recentPicks = manager.recentPicks?.find((p: any) => p.gameweek === availableGameweek);
 		if (!recentPicks?.data?.picks) return [];
 
 		return recentPicks.data.picks
@@ -31,11 +45,11 @@
 	});
 
 	// Free agents
-	let freeAgents = $derived(() => {
+	let freeAgents = $derived.by(() => {
 		const owned = new Set<number>();
 
 		entries.forEach(entry => {
-			const recentPicks = entry.recentPicks.find((p: any) => p.gameweek === currentGameweek);
+			const recentPicks = entry.recentPicks?.find((p: any) => p.gameweek === availableGameweek);
 			if (recentPicks?.data?.picks) {
 				recentPicks.data.picks.forEach((pick: any) => {
 					owned.add(pick.element);
@@ -49,7 +63,7 @@
 	});
 
 	// Squad strength by position - uses server-calculated data based on actual gameweek picks
-	let squadStrength = $derived(() => {
+	let squadStrength = $derived.by(() => {
 		return entries
 			.filter((entry: any) => entry.stats?.totalSquadPoints > 0)
 			.map((entry: any) => ({
@@ -62,49 +76,51 @@
 	});
 </script>
 
-<Card.Root>
-	<Card.Header>
-		<Card.Title class="text-fpl-purple text-2xl">⚽ Squad Analysis</Card.Title>
-		<Card.Description>Explore squads, free agents, and team strength</Card.Description>
-	</Card.Header>
-	<Card.Content class="space-y-6">
-		<!-- Tab Navigation -->
-		<div class="flex gap-2 p-2 bg-muted rounded-lg">
-			<button
-				class="flex-1 px-4 py-3 rounded-md font-medium transition-all {activeView === 'squads' ? 'bg-fpl-purple text-white' : 'bg-transparent text-foreground hover:bg-muted-foreground/10'}"
-				onclick={() => activeView = 'squads'}
-			>
-				📋 Squad Viewer
-			</button>
-			<button
-				class="flex-1 px-4 py-3 rounded-md font-medium transition-all {activeView === 'free-agents' ? 'bg-fpl-purple text-white' : 'bg-transparent text-foreground hover:bg-muted-foreground/10'}"
-				onclick={() => activeView = 'free-agents'}
-			>
-				🆓 Free Agents
-			</button>
-			<button
-				class="flex-1 px-4 py-3 rounded-md font-medium transition-all {activeView === 'strength' ? 'bg-fpl-purple text-white' : 'bg-transparent text-foreground hover:bg-muted-foreground/10'}"
-				onclick={() => activeView = 'strength'}
-			>
-				💪 Squad Strength
-			</button>
-		</div>
-
-		{#if activeView === 'squads'}
-			<div class="space-y-6">
-				<ManagerSelector entries={entries} bind:selectedManager label="Select Manager" />
-				<SquadViewer squad={selectedManagerSquad()} />
+<div class="space-y-6">
+	<!-- Section: Squad Viewer -->
+	<Card.Root>
+		<Card.Header class="flex-row items-center gap-2">
+			<Users class="w-4 h-4 text-accent" />
+			<div>
+				<Card.Title>Squad Viewer</Card.Title>
+				<Card.Description>View any manager's current squad</Card.Description>
 			</div>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			<ManagerSelector entries={entries} bind:selectedManager label="Select Manager" />
+			<SquadViewer squad={selectedManagerSquad} />
+		</Card.Content>
+	</Card.Root>
 
-		{:else if activeView === 'free-agents'}
+	<!-- Section: Squad Strength Comparison -->
+	<Card.Root>
+		<Card.Header class="flex-row items-center gap-2">
+			<BarChart3 class="w-4 h-4 text-accent" />
+			<div>
+				<Card.Title>Squad Strength</Card.Title>
+				<Card.Description>Compare total squad points by position</Card.Description>
+			</div>
+		</Card.Header>
+		<Card.Content>
+			<SquadStrengthComparison squadStrength={squadStrength} />
+		</Card.Content>
+	</Card.Root>
+
+	<!-- Section: Free Agents -->
+	<Card.Root>
+		<Card.Header class="flex-row items-center gap-2">
+			<UserSearch class="w-4 h-4 text-accent" />
+			<div>
+				<Card.Title>Free Agents</Card.Title>
+				<Card.Description>Available players not owned by any manager</Card.Description>
+			</div>
+		</Card.Header>
+		<Card.Content>
 			<FreeAgentsList
-				freeAgents={freeAgents()}
+				freeAgents={freeAgents}
 				bind:positionFilter
 				bind:searchTerm
 			/>
-
-		{:else if activeView === 'strength'}
-			<SquadStrengthComparison squadStrength={squadStrength()} />
-		{/if}
-	</Card.Content>
-</Card.Root>
+		</Card.Content>
+	</Card.Root>
+</div>

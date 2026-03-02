@@ -26,7 +26,7 @@
 	<!-- Filters -->
 	<div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-6 bg-muted rounded-lg">
 		<div class="flex flex-col gap-2">
-			<label for="position" class="font-semibold text-fpl-purple text-sm">Position:</label>
+			<label for="position" class="font-semibold text-accent text-sm">Position:</label>
 			<select
 				id="position"
 				bind:value={positionFilter}
@@ -40,7 +40,7 @@
 			</select>
 		</div>
 		<div class="flex flex-col gap-2">
-			<label for="search" class="font-semibold text-fpl-purple text-sm">Search:</label>
+			<label for="search" class="font-semibold text-accent text-sm">Search:</label>
 			<input
 				type="text"
 				id="search"
@@ -54,47 +54,47 @@
 	<!-- Stats Summary -->
 	<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
 		<div class="flex flex-col items-center p-6 bg-gradient-to-br from-fpl-green to-cyan-400 rounded-lg">
-			<span class="text-3xl font-bold text-fpl-purple">{freeAgents.length}</span>
-			<span class="text-sm font-semibold text-fpl-purple">Total Free Agents</span>
+			<span class="text-3xl font-bold text-accent">{freeAgents.length}</span>
+			<span class="text-sm font-semibold text-accent">Total Free Agents</span>
 		</div>
 		<div class="flex flex-col items-center p-6 bg-gradient-to-br from-fpl-green to-cyan-400 rounded-lg">
-			<span class="text-3xl font-bold text-fpl-purple">{freeAgents.filter((p: any) => p.position_name === 'Forward').length}</span>
-			<span class="text-sm font-semibold text-fpl-purple">Forwards</span>
+			<span class="text-3xl font-bold text-accent">{freeAgents.filter((p: any) => p.position_name === 'Forward').length}</span>
+			<span class="text-sm font-semibold text-accent">Forwards</span>
 		</div>
 		<div class="flex flex-col items-center p-6 bg-gradient-to-br from-fpl-green to-cyan-400 rounded-lg">
-			<span class="text-3xl font-bold text-fpl-purple">{freeAgents.filter((p: any) => p.position_name === 'Midfielder').length}</span>
-			<span class="text-sm font-semibold text-fpl-purple">Midfielders</span>
+			<span class="text-3xl font-bold text-accent">{freeAgents.filter((p: any) => p.position_name === 'Midfielder').length}</span>
+			<span class="text-sm font-semibold text-accent">Midfielders</span>
 		</div>
 		<div class="flex flex-col items-center p-6 bg-gradient-to-br from-fpl-green to-cyan-400 rounded-lg">
-			<span class="text-3xl font-bold text-fpl-purple">{freeAgents.filter((p: any) => p.position_name === 'Defender').length}</span>
-			<span class="text-sm font-semibold text-fpl-purple">Defenders</span>
+			<span class="text-3xl font-bold text-accent">{freeAgents.filter((p: any) => p.position_name === 'Defender').length}</span>
+			<span class="text-sm font-semibold text-accent">Defenders</span>
 		</div>
 	</div>
 
 	<!-- Top Available Players -->
 	<div class="space-y-4">
-		<h3 class="text-fpl-purple text-xl font-semibold">Top Available Players</h3>
+		<h3 class="text-accent text-xl font-semibold">Top Available Players</h3>
 		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 			{#each filteredFreeAgents as player}
 				<div class="p-4 bg-muted rounded-lg border-l-4 border-fpl-green">
 					<div class="flex justify-between items-center mb-2">
-						<h4 class="font-semibold text-fpl-purple">{player.web_name}</h4>
+						<h4 class="font-semibold text-accent">{player.web_name}</h4>
 						<Badge variant="secondary" class="text-xs">
 							{player.position_name}
 						</Badge>
 					</div>
 					<div class="flex justify-between items-center pb-3 mb-3 border-b border-border">
 						<span class="text-sm text-muted-foreground">{player.team_name}</span>
-						<span class="font-semibold text-fpl-purple">{player.total_points} pts</span>
+						<span class="font-semibold text-accent">{player.total_points} pts</span>
 					</div>
 					<div class="grid grid-cols-2 gap-2">
 						<div class="flex flex-col items-center p-2 bg-background rounded">
 							<span class="text-xs text-muted-foreground uppercase">Form</span>
-							<span class="font-semibold text-fpl-purple">{player.form}</span>
+							<span class="font-semibold text-accent">{player.form}</span>
 						</div>
 						<div class="flex flex-col items-center p-2 bg-background rounded">
 							<span class="text-xs text-muted-foreground uppercase">PPG</span>
-							<span class="font-semibold text-fpl-purple">{player.points_per_game}</span>
+							<span class="font-semibold text-accent">{player.points_per_game}</span>
 						</div>
 					</div>
 				</div>

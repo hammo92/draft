@@ -68,7 +68,7 @@
 		<Card.Header>
 			<div class="flex items-center justify-between flex-wrap gap-4">
 				<div>
-					<Card.Title class="font-serif text-2xl font-semibold text-foreground">Luck Index</Card.Title>
+					<Card.Title class="font-sans text-2xl font-semibold text-foreground">Luck Index</Card.Title>
 					<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
 						Season luck ranking
 					</Card.Description>
@@ -110,7 +110,7 @@
 						<span class="font-mono text-xs uppercase tracking-wider text-muted-foreground bg-muted px-2 py-1 rounded">
 							{getRankLabel(index, sortedByLuck.length)}
 						</span>
-						<Card.Title class="font-serif text-xl font-semibold text-foreground">
+						<Card.Title class="font-sans text-xl font-semibold text-foreground">
 							{manager.managerName}
 						</Card.Title>
 					</div>

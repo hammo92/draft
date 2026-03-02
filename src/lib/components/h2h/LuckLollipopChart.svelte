@@ -37,9 +37,9 @@
 	});
 
 	// Layout constants
-	const svgWidth = 500;
-	const nameColumnWidth = 140; // Fixed space for names
-	const valueLabelWidth = 50; // Space for value labels on right
+	const svgWidth = 600;
+	const nameColumnWidth = 160; // Fixed space for names
+	const valueLabelWidth = 60; // Space for value labels on right
 	const chartWidth = svgWidth - nameColumnWidth - valueLabelWidth; // Remaining space for chart
 
 	// Calculate zero position within the chart area based on data distribution
@@ -87,8 +87,10 @@
 			<text
 				x="10"
 				{y}
-				class="text-xs font-mono fill-muted-foreground"
+				class="text-sm font-sans fill-foreground"
 				dominant-baseline="middle"
+				textLength={manager.managerName.length > 14 ? nameColumnWidth - 20 : undefined}
+				lengthAdjust="spacingAndGlyphs"
 			>
 				{manager.managerName}
 			</text>

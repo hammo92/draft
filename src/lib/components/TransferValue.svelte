@@ -51,7 +51,7 @@
 
 <Card.Root class="bg-card border border-border rounded shadow-none">
 	<Card.Header>
-		<Card.Title class="font-serif text-2xl font-semibold text-foreground">Transfer Value</Card.Title>
+		<Card.Title class="font-sans text-2xl font-semibold text-foreground">Transfer Value</Card.Title>
 		<Card.Description class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
 			Actual points vs if you'd kept your GW1 squad (with auto-subs)
 		</Card.Description>
@@ -66,7 +66,7 @@
 							#{index + 1}
 						</div>
 						<div>
-							<h4 class="font-serif font-semibold text-foreground">{entry.entry_name}</h4>
+							<h4 class="font-sans font-semibold text-foreground">{entry.entry_name}</h4>
 							<div class="font-mono text-xs text-muted-foreground">
 								Actual: {entry.actualTotal} | GW1 Squad: {entry.gw1Total} | {entry.transfers.length} transfers
 							</div>

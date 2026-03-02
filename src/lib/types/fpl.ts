@@ -281,6 +281,128 @@ export interface ManagerLuck {
 	efficiency: number;
 }
 
+// Fixture luck - schedule favorability + opponent variance
+export interface FixtureLuckGW {
+	gameweek: number;
+	score: number;
+	expectedScore: number; // Your expected score
+	wouldBeat: number;
+	wouldDraw: number;
+	wouldLose: number;
+	totalOpponents: number;
+	expectedFixturePoints: number;
+	actualFixturePoints: number;
+	fixtureLuck: number; // Schedule-based luck
+	opponentName: string;
+	opponentScore: number;
+	opponentExpectedScore: number; // Opponent's expected score
+	opponentVariance: number; // Opponent's (actual - expected)
+}
+
+export interface ManagerFixtureLuck {
+	managerId: number;
+	managerName: string;
+	gameweeks: FixtureLuckGW[];
+	totalFixtureLuck: number; // Schedule-based luck total
+	expectedFixturePoints: number;
+	actualFixturePoints: number;
+	luckyWins: number;
+	unluckyLosses: number;
+	totalOpponentVariance: number; // Sum of opponent variance across all matches
+}
+
+// Holistic luck - combined performance + schedule + robbery luck
+export interface HolisticLuck {
+	managerId: number;
+	managerName: string;
+	// Performance luck (your players over/underperformance)
+	performanceLuck: number;
+	performanceZScore: number;
+	// Schedule luck (fixture points relative to expected based on score ranking)
+	scheduleLuck: number;
+	scheduleZScore: number;
+	// Outcome luck from loss analysis (FP lost to factors outside your control)
+	outcomeLuck: number; // FP lost to opponent-luck + robberies (negative = bad luck)
+	outcomeZScore: number;
+	// Loss breakdown from analysis
+	fairLosses: number;
+	selfInflictedLosses: number;
+	opponentLuckLosses: number;
+	robberyLosses: number;
+	mixedLosses: number;
+	// FP impact
+	fpLostToOpponentLuck: number; // Opponent overperformed team-wide
+	fpLostToRobberies: number; // Single player hauls
+	totalFPLost: number;
+	// Combined holistic luck
+	holisticZScore: number;
+	holisticRank: number;
+	// Outcome tracking
+	luckyWins: number;
+	unluckyLosses: number;
+	luckyDraws: number;
+	unluckyDraws: number;
+}
+
+// Loss categorization - clear breakdown of why each loss happened
+export type LossCategory =
+	| 'fair'           // Both performed as expected, opponent was just better
+	| 'self-inflicted' // You underperformed (your actual < expected)
+	| 'opponent-luck'  // Opponent overperformed (team-wide)
+	| 'robbery'        // Opponent overperformed due to single player
+	| 'mixed';         // Both you underperformed AND opponent overperformed
+
+export interface GameweekResult {
+	gameweek: number;
+	result: 'W' | 'L' | 'D';
+	yourScore: number;
+	yourExpected: number;
+	yourVariance: number; // actual - expected (negative = underperformed)
+	opponentName: string;
+	opponentScore: number;
+	opponentExpected: number;
+	opponentVariance: number; // actual - expected (positive = overperformed)
+	// For losses only
+	lossCategory?: LossCategory;
+	robberyPlayer?: string; // If robbery, who was the culprit
+	robberyPoints?: number; // How much the culprit overperformed
+	wasAlsoSelfInflicted?: boolean; // For robberies: did you also underperform?
+	// Fixture points
+	expectedFP: number;
+	actualFP: number;
+	fpLuck: number;
+}
+
+export interface ManagerLossAnalysis {
+	managerId: number;
+	managerName: string;
+	gameweeks: GameweekResult[];
+	// Aggregated stats
+	totalWins: number;
+	totalDraws: number;
+	totalLosses: number;
+	// Loss breakdown by category
+	fairLosses: number;
+	selfInflictedLosses: number;
+	opponentLuckLosses: number;
+	robberyLosses: number;
+	robberiesAlsoSelfInflicted: number; // Robberies where you also underperformed
+	mixedLosses: number;
+	// FP impact by category
+	fpLostToFair: number;
+	fpLostToSelf: number;
+	fpLostToOpponentLuck: number;
+	fpLostToRobberies: number;
+	fpLostToMixed: number;
+	totalFPLost: number;
+	// Lucky wins (you overperformed or opponent underperformed)
+	luckyWins: number;
+	fpGainedFromLuck: number;
+	// Draw luck tracking
+	luckyDraws: number; // Draws where you underperformed (expected to lose)
+	unluckyDraws: number; // Draws where you overperformed (expected to win)
+}
+
 export interface RivalryStats {
 	biggestWin: { winner: string; loser: string; score: string; margin: number; gameweek: number } | null;
 	closestGame: { manager1: string; manager2: string; score: string; margin: number; gameweek: number } | null;

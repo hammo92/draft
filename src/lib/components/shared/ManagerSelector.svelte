@@ -10,12 +10,12 @@
 	} = $props();
 </script>
 
-<div class="flex items-center gap-4 p-4 bg-muted rounded-lg">
-	<label for="manager-selector" class="font-semibold text-fpl-purple">{label}:</label>
+<div class="flex items-center gap-3 p-3 bg-muted/50 border border-border rounded-sm">
+	<label for="manager-selector" class="label-bright whitespace-nowrap">{label}:</label>
 	<select
 		id="manager-selector"
 		bind:value={selectedManager}
-		class="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+		class="flex-1 h-8 rounded-sm border border-border bg-input px-2 py-1 text-sm font-sans focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
 	>
 		{#each entries as entry}
 			<option value={entry.entry_id}>
